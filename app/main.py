@@ -24,7 +24,7 @@ log = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db()
+    await init_db()
     log.info("✅ Database initialized")
     log.info("✅ FastAPI server Marco Polo Hotel Bot ishga tushdi")
     yield
@@ -89,7 +89,7 @@ async def manychat_webhook(payload: ManyChatPayload):
     
     log.info(f"[Instagram] {payload.user_id}: {payload.message[:60]}")
     
-    register_user(
+    await register_user(
         user_id=user_id,
         user_type="instagram",
         first_name=payload.first_name or "Mehmon"
@@ -103,16 +103,16 @@ async def manychat_webhook(payload: ManyChatPayload):
         booking_data['source'] = 'instagram'
         
         try:
-            create_order(booking_data)
-            log_activity(user_id, "booking_confirmed", f"Order: {order_id}")
+            await create_order(booking_data)
+            await log_activity(user_id, "booking_confirmed", f"Order: {order_id}")
             log.info(f"[INSTAGRAM BOOKING] Saved: {order_id} - {booking_data.get('room_name')}")
             del BOOKING_STORE[user_id]
             
             from app.ai_handler import send_order_to_admins
-            admins = get_admins()
+            admins = await get_admins()
             super_admin = os.getenv("SUPER_ADMIN_ID")
             if super_admin:
-                admins.append(super_admin)
+                admins.extend([x.strip() for x in super_admin.split(',')])
             
             if admins:
                 try:
@@ -164,7 +164,7 @@ Tez orada operator siz bilan bog'lanadi!"""
             platform="instagram"
         )
     
-    log_activity(user_id, "instagram_dm", payload.message[:50])
+    await log_activity(user_id, "instagram_dm", payload.message[:50])
     
     return JSONResponse(content=format_manychat_response(reply))
 
@@ -177,7 +177,7 @@ async def make_webhook(payload: MakePayload):
     
     log.info(f"[Make.com Instagram] {payload.user_id}: {payload.message[:60]}")
     
-    register_user(
+    await register_user(
         user_id=user_id,
         user_type="instagram",
         first_name=payload.first_name or "Mehmon"
@@ -191,15 +191,15 @@ async def make_webhook(payload: MakePayload):
         booking_data['source'] = 'instagram'
         
         try:
-            create_order(booking_data)
-            log_activity(user_id, "booking_confirmed", f"Order: {order_id}")
+            await create_order(booking_data)
+            await log_activity(user_id, "booking_confirmed", f"Order: {order_id}")
             del BOOKING_STORE[user_id]
             
             from app.ai_handler import send_order_to_admins
-            admins = get_admins()
+            admins = await get_admins()
             super_admin = os.getenv("SUPER_ADMIN_ID")
             if super_admin:
-                admins.append(super_admin)
+                admins.extend([x.strip() for x in super_admin.split(',')])
             
             if admins:
                 try:
@@ -228,7 +228,7 @@ async def make_webhook(payload: MakePayload):
             platform="instagram"
         )
     
-    log_activity(user_id, "make_dm", payload.message[:50])
+    await log_activity(user_id, "make_dm", payload.message[:50])
     return {"reply": reply}
 
 @app.post("/webhook/chatfuel")
@@ -239,7 +239,7 @@ async def chatfuel_webhook(payload: ChatfuelPayload):
     
     log.info(f"[Chatfuel Instagram] {payload.chatfuel_user_id}: {payload.last_user_freeform_input[:60]}")
     
-    register_user(
+    await register_user(
         user_id=user_id,
         user_type="instagram",
         first_name=payload.first_name or "Mehmon"
@@ -253,15 +253,15 @@ async def chatfuel_webhook(payload: ChatfuelPayload):
         booking_data['source'] = 'instagram'
         
         try:
-            create_order(booking_data)
-            log_activity(user_id, "booking_confirmed", f"Order: {order_id}")
+            await create_order(booking_data)
+            await log_activity(user_id, "booking_confirmed", f"Order: {order_id}")
             del BOOKING_STORE[user_id]
             
             from app.ai_handler import send_order_to_admins
-            admins = get_admins()
+            admins = await get_admins()
             super_admin = os.getenv("SUPER_ADMIN_ID")
             if super_admin:
-                admins.append(super_admin)
+                admins.extend([x.strip() for x in super_admin.split(',')])
             
             if admins:
                 try:
@@ -290,7 +290,7 @@ async def chatfuel_webhook(payload: ChatfuelPayload):
             platform="instagram"
         )
     
-    log_activity(user_id, "chatfuel_dm", payload.last_user_freeform_input[:50])
+    await log_activity(user_id, "chatfuel_dm", payload.last_user_freeform_input[:50])
     
     # Chatfuel kutilgan maxsus JSON format:
     return JSONResponse(content={
@@ -315,7 +315,7 @@ async def instagram_webhook(request: Request):
                     if message_text and sender_id:
                         log.info(f"[Instagram DM] {sender_id}: {message_text[:60]}")
                         
-                        register_user(
+                        await register_user(
                             user_id=f"ig_{sender_id}",
                             user_type="instagram",
                             first_name="Instagram User"
@@ -343,7 +343,7 @@ async def instagram_webhook(request: Request):
                         else:
                             log.warning("INSTAGRAM_ACCESS_TOKEN not set!")
                             
-                        log_activity(f"ig_{sender_id}", "instagram_dm", message_text[:50])
+                        await log_activity(f"ig_{sender_id}", "instagram_dm", message_text[:50])
                         
         return {"status": "ok"}
     except Exception as e:
@@ -417,8 +417,8 @@ async def create_order_api(order: OrderPayload):
     }
     
     try:
-        create_order(order_data)
-        log_activity(order.user_id, "api_order", f"Order {order_id} created via API")
+        await create_order(order_data)
+        await log_activity(order.user_id, "api_order", f"Order {order_id} created via API")
         return {"status": "success", "order_id": order_id}
     except Exception as e:
         log.error(f"Order creation error: {e}")
@@ -430,10 +430,10 @@ async def get_stats():
     """Statistika API"""
     from config.database import get_user_count, get_orders_count, get_monthly_stats
     
-    monthly = get_monthly_stats()
+    monthly = await get_monthly_stats()
     
     return {
-        "total_users": get_user_count(),
+        "total_users": await get_user_count(),
         "total_orders": monthly['total_orders'],
         "monthly_revenue": monthly['revenue'],
         "active_chats": active_users()
@@ -448,10 +448,10 @@ async def notify_admins(request: Request):
     try:
         body = await request.json()
         message = body.get("message", "")
-        admin_ids = get_admins()
+        admin_ids = await get_admins()
         super_admin = os.getenv("SUPER_ADMIN_ID")
         if super_admin:
-            admin_ids.append(super_admin)
+            admin_ids.extend([x.strip() for x in super_admin.split(',')])
         
         return {
             "status": "ok",

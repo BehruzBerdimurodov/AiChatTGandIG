@@ -12,7 +12,7 @@ async def check_subscription(bot: Bot, user_id: int) -> tuple[bool, list]:
     Foydalanuvchi barcha majburiy kanallarga obuna bo'lganini tekshiradi.
     Returns: (all_subscribed: bool, not_subscribed_channels: list)
     """
-    channels = get_channels()
+    channels = await get_channels()
     if not channels:
         return True, []
 

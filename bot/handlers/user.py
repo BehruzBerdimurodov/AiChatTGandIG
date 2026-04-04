@@ -43,14 +43,14 @@ async def cmd_start(message: Message, bot: Bot):
         )
         return
     
-    register_user(
+    await register_user(
         user_id=user_id,
         user_type='telegram',
         first_name=user.first_name or "Mehmon",
         last_name=user.last_name or "",
         username=user.username or ""
     )
-    log_activity(user_id, "start", f"/start")
+    await log_activity(user_id, "start", f"/start")
 
     ok, missing = await check_subscription(bot, user.id)
     if not ok:
@@ -60,7 +60,7 @@ async def cmd_start(message: Message, bot: Bot):
         )
         return
 
-    hotel = get_hotel()
+    hotel = await get_hotel()
     name = user.first_name or "Mehmon"
     
     await message.answer(
@@ -91,7 +91,7 @@ async def check_sub_callback(callback: CallbackQuery, bot: Bot):
 @router.message(F.text == "🏨 Xonalar va narxlar")
 @router.message(Command("rooms"))
 async def show_rooms(message: Message):
-    rooms = get_rooms(only_active=True)
+    rooms = await get_rooms(only_active=True)
     if not rooms:
         await message.answer("😔 Hozirda xonalar mavjud emas.")
         return
@@ -103,7 +103,7 @@ async def show_rooms(message: Message):
         text += f"   📋 {room['description']}\n"
         text += f"   👥 {room['capacity']} kishi\n\n"
     
-    hotel = get_hotel()
+    hotel = await get_hotel()
     text += "━━━━━━━━━━━━━━━━━━\n"
     text += f"📞 {hotel.get('phone', '+998773397171')}"
     
@@ -112,7 +112,7 @@ async def show_rooms(message: Message):
 
 @router.callback_query(F.data == "book_now")
 async def book_now(callback: CallbackQuery):
-    rooms = get_rooms(only_active=True)
+    rooms = await get_rooms(only_active=True)
     
     buttons = []
     for room in rooms:
@@ -132,7 +132,7 @@ async def book_now(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("book_room_"))
 async def book_select_room(callback: CallbackQuery):
     room_id = callback.data.replace("book_room_", "")
-    room = get_room(room_id)
+    room = await get_room(room_id)
     
     if not room:
         await callback.answer("❌ Xona topilmadi", show_alert=True)
@@ -193,12 +193,12 @@ async def back_main(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("room_"))
 async def room_detail(callback: CallbackQuery):
     room_id = callback.data.replace("room_", "")
-    room = get_room(room_id)
+    room = await get_room(room_id)
     if not room:
         await callback.answer("❌ Xona topilmadi")
         return
     
-    hotel = get_hotel()
+    hotel = await get_hotel()
     
     await callback.message.edit_text(
         f"<b>🛏️ {room['name']}</b>\n\n"
@@ -229,7 +229,7 @@ async def show_address(message: Message):
 @router.message(F.text == "📞 Bog'lanish")
 @router.message(Command("contact"))
 async def show_contact(message: Message):
-    hotel = get_hotel()
+    hotel = await get_hotel()
     await message.answer(
         f"<b>📞 Bog'lanish:</b>\n\n"
         f"📱 Telefon 1: {hotel.get('phone', '+998773397171')}\n"
@@ -274,7 +274,7 @@ async def ask_question(message: Message):
 
 @router.message(F.text == "📋 Bron qilish")
 async def book_from_menu(message: Message):
-    rooms = get_rooms(only_active=True)
+    rooms = await get_rooms(only_active=True)
     
     buttons = []
     for room in rooms:
@@ -328,16 +328,16 @@ async def handle_all_messages(message: Message, bot: Bot):
             
             from config.database import create_order, get_admins
             try:
-                create_order(order_data)
-                log_activity(user_id, "booking_confirmed", f"Order: {order_id}")
+                await create_order(order_data)
+                await log_activity(user_id, "booking_confirmed", f"Order: {order_id}")
                 print(f"[CONFIRM TEXT] Order saved: {order_id}")
             except Exception as e:
                 log.error(f"Order error: {e}")
             
-            admins = get_admins()
+            admins = await get_admins()
             super_admin = os.getenv("SUPER_ADMIN_ID", "")
             if super_admin:
-                admins.append(super_admin)
+                admins.extend([x.strip() for x in super_admin.split(',')])
             
             from app.ai_handler import send_order_to_admins
             if admins:
@@ -467,16 +467,16 @@ async def handle_all_messages(message: Message, bot: Bot):
         
         from config.database import create_order, get_admins
         try:
-            create_order(order_data)
-            log_activity(user_id, "booking_confirmed", f"Order: {order_id}")
+            await create_order(order_data)
+            await log_activity(user_id, "booking_confirmed", f"Order: {order_id}")
             print(f"[CONFIRM TEXT] Order saved: {order_id}")
         except Exception as e:
             log.error(f"Order error: {e}")
         
-        admins = get_admins()
+        admins = await get_admins()
         super_admin = os.getenv("SUPER_ADMIN_ID", "")
         if super_admin:
-            admins.append(super_admin)
+            admins.extend([x.strip() for x in super_admin.split(',')])
         
         from app.ai_handler import send_order_to_admins
         if admins:
@@ -579,8 +579,8 @@ async def confirm_booking(callback: CallbackQuery, bot: Bot):
     }
     
     try:
-        create_order(order_data)
-        log_activity(user_id, "booking_confirmed", f"Order: {order_id}")
+        await create_order(order_data)
+        await log_activity(user_id, "booking_confirmed", f"Order: {order_id}")
         print(f"[CONFIRM] Order saved to DB: {order_id} - {data.get('room_name')} - {data.get('name')}")
     except Exception as e:
         log.error(f"Order error: {e}")
@@ -588,18 +588,18 @@ async def confirm_booking(callback: CallbackQuery, bot: Bot):
     
     clear_booking_data(f"tg_{user_id}")
     
-    admins = get_admins()
+    admins = await get_admins()
     super_admin = os.getenv("SUPER_ADMIN_ID", "")
     if super_admin:
-        admins.append(super_admin)
+        admins.extend([x.strip() for x in super_admin.split(',')])
     
     from app.ai_handler import send_order_to_admins
     if admins:
         await send_order_to_admins(bot, order_data, admins)
     
-    log_activity(user_id, "booking", f"Order {order_id}")
+    await log_activity(user_id, "booking", f"Order {order_id}")
     
-    hotel = get_hotel()
+    hotel = await get_hotel()
     await callback.message.edit_text(
         f"✅ <b>Broningiz qabul qilindi!</b>\n\n"
         f"🏨 {data.get('room_name')}\n"

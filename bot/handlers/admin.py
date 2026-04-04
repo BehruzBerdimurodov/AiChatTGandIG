@@ -64,7 +64,7 @@ ADMIN_IN_ADMIN_MODE = set()
 @router.message(Command("admin"))
 async def admin_panel(message: Message, state: FSMContext):
     user_id = str(message.from_user.id)
-    if not is_admin(user_id, os.getenv("SUPER_ADMIN_ID")):
+    if not await is_admin(user_id, os.getenv("SUPER_ADMIN_ID")):
         return
     
     ADMIN_IN_ADMIN_MODE.add(user_id)
@@ -106,14 +106,14 @@ async def admin_logout(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "stats_refresh")
 async def show_stats(callback: CallbackQuery):
-    if not is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
     
-    rooms = get_rooms()
+    rooms = await get_rooms()
     active_rooms = sum(1 for r in rooms if r.get("active"))
-    channels = get_channels()
-    daily = get_daily_stats()
-    monthly = get_monthly_stats()
+    channels = await get_channels()
+    daily = await get_daily_stats()
+    monthly = await get_monthly_stats()
     
     await callback.message.edit_text(
         f"""
@@ -121,7 +121,7 @@ async def show_stats(callback: CallbackQuery):
 
 ━━━━━━━━━━━━━━━━━━
 👥 Foydalanuvchilar:
-   • Jami: <b>{get_user_count()}</b> ta
+   • Jami: <b>{await get_user_count()}</b> ta
    • Bugun: +{daily['new_users']} ta
 
 📋 Buyurtmalar:
@@ -136,7 +136,7 @@ async def show_stats(callback: CallbackQuery):
 
 💰 Daromad: <b>{format_price(monthly['revenue'])} so'm</b>
 
-👮 Adminlar: <b>{len(get_admins())}</b> ta
+👮 Adminlar: <b>{len(await get_admins())}</b> ta
 ━━━━━━━━━━━━━━━━━━
 """,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -147,7 +147,7 @@ async def show_stats(callback: CallbackQuery):
 
 @router.callback_query(F.data == "orders_menu")
 async def orders_menu(callback: CallbackQuery):
-    if not is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -161,7 +161,7 @@ async def orders_menu(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("orders_"))
 async def orders_list(callback: CallbackQuery):
-    if not is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
     
     status_map = {
@@ -171,7 +171,7 @@ async def orders_list(callback: CallbackQuery):
     }
     
     status = status_map.get(callback.data)
-    orders = get_orders(status)
+    orders = await get_orders(status)
     
     if not orders:
         await callback.message.edit_text(
@@ -210,11 +210,11 @@ async def orders_list(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("view_order_"))
 async def view_order(callback: CallbackQuery, bot: Bot):
-    if not is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
     
     order_id = callback.data.replace("view_order_", "")
-    order = get_order(order_id)
+    order = await get_order(order_id)
     
     if not order:
         await callback.answer("❌ Buyurtma topilmadi", show_alert=True)
@@ -266,11 +266,11 @@ async def view_order(callback: CallbackQuery, bot: Bot):
 
 @router.callback_query(F.data.startswith("order_complete_"))
 async def order_complete(callback: CallbackQuery):
-    if not is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
     
     order_id = callback.data.replace("order_complete_", "")
-    update_order(order_id, "status", "completed")
+    await update_order(order_id, "status", "completed")
     
     await callback.answer("✅ Tugallandi!", show_alert=True)
     await callback.message.edit_text("✅ Buyurtma tugallangan deb belgilandi!", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -280,14 +280,14 @@ async def order_complete(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("order_confirm_"))
 async def order_confirm(callback: CallbackQuery, bot: Bot):
-    if not is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
     
     order_id = callback.data.replace("order_confirm_", "")
-    update_order(order_id, "status", "confirmed")
+    await update_order(order_id, "status", "confirmed")
     
-    order = get_order(order_id)
-    hotel = get_hotel()
+    order = await get_order(order_id)
+    hotel = await get_hotel()
     
     if order:
         user_id = order.get('user_id', '')
@@ -315,11 +315,11 @@ async def order_confirm(callback: CallbackQuery, bot: Bot):
 
 @router.callback_query(F.data.startswith("order_cancel_"))
 async def order_cancel(callback: CallbackQuery):
-    if not is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
     
     order_id = callback.data.replace("order_cancel_", "")
-    update_order(order_id, "status", "cancelled")
+    await update_order(order_id, "status", "cancelled")
     
     await callback.answer("❌ Bekor qilindi!", show_alert=True)
     await callback.message.edit_text("❌ Buyurtma bekor qilindi!", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -329,10 +329,10 @@ async def order_cancel(callback: CallbackQuery):
 
 @router.callback_query(F.data == "users_menu")
 async def users_menu(callback: CallbackQuery):
-    if not is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
     
-    users = get_all_users()
+    users = await get_all_users()
     count = len(users)
     
     text = f"👥 <b>Foydalanuvchilar:</b>\n\nJami: <b>{count}</b> ta\n\n"
@@ -350,7 +350,7 @@ async def users_menu(callback: CallbackQuery):
 
 @router.callback_query(F.data == "broadcast_menu")
 async def broadcast_menu(callback: CallbackQuery, state: FSMContext):
-    if not is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
     
     await state.set_state(BroadcastState.message)
@@ -363,7 +363,7 @@ async def broadcast_menu(callback: CallbackQuery, state: FSMContext):
 
 @router.message(BroadcastState.message)
 async def broadcast_send(message: Message, state: FSMContext, bot: Bot):
-    if not is_admin(str(message.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+    if not await is_admin(str(message.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         await state.clear()
         return
     
@@ -373,7 +373,7 @@ async def broadcast_send(message: Message, state: FSMContext, bot: Bot):
         return
     
     await state.clear()
-    users = get_all_users()
+    users = await get_all_users()
     sent = 0
     
     for user in users:
@@ -393,7 +393,7 @@ async def broadcast_send(message: Message, state: FSMContext, bot: Bot):
 
 @router.callback_query(F.data == "admin_back")
 async def admin_back(callback: CallbackQuery):
-    if not is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -413,10 +413,10 @@ async def admin_back(callback: CallbackQuery):
 
 @router.callback_query(F.data == "admin_rooms_list")
 async def rooms_manage(callback: CallbackQuery):
-    if not is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
     
-    rooms = get_rooms()
+    rooms = await get_rooms()
     buttons = []
     for room in rooms:
         status = "✅" if room.get("active") else "❌"
@@ -436,11 +436,11 @@ async def rooms_manage(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("admin_room_"))
 async def room_detail_admin(callback: CallbackQuery):
-    if not is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
     
     room_id = callback.data.replace("admin_room_", "")
-    room = get_room(room_id)
+    room = await get_room(room_id)
     
     if not room:
         await callback.answer("❌ Xona topilmadi")
@@ -469,13 +469,13 @@ async def room_detail_admin(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("toggle_room_"))
 async def toggle_room(callback: CallbackQuery):
-    if not is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
     
     room_id = callback.data.replace("toggle_room_", "")
-    room = get_room(room_id)
+    room = await get_room(room_id)
     new_status = 0 if room.get("active") else 1
-    update_room(room_id, "active", new_status)
+    await update_room(room_id, "active", new_status)
     
     await callback.answer("✅ Holat o'zgartirildi!")
     await callback.message.edit_text(
@@ -491,11 +491,11 @@ async def toggle_room(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("delete_room_"))
 async def delete_room_confirm(callback: CallbackQuery):
-    if not is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
     
     room_id = callback.data.replace("delete_room_", "")
-    room = get_room(room_id)
+    room = await get_room(room_id)
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ Ha, o'chirish", callback_data=f"confirm_delete_{room_id}"),
@@ -510,15 +510,15 @@ async def delete_room_confirm(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("confirm_delete_"))
 async def confirm_delete(callback: CallbackQuery):
-    if not is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
     
     room_id = callback.data.replace("confirm_delete_", "")
-    delete_room(room_id)
+    await delete_room(room_id)
     
     await callback.answer("✅ Xona o'chirildi!")
     
-    rooms = get_rooms()
+    rooms = await get_rooms()
     buttons = []
     for room in rooms:
         status = "✅" if room.get("active") else "❌"
@@ -533,7 +533,7 @@ async def confirm_delete(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("edit_room_price_"))
 async def edit_room_price(callback: CallbackQuery, state: FSMContext):
-    if not is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
     
     room_id = callback.data.replace("edit_room_price_", "")
@@ -545,7 +545,7 @@ async def edit_room_price(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("edit_room_desc_"))
 async def edit_room_desc(callback: CallbackQuery, state: FSMContext):
-    if not is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
     
     room_id = callback.data.replace("edit_room_desc_", "")
@@ -557,7 +557,7 @@ async def edit_room_desc(callback: CallbackQuery, state: FSMContext):
 
 @router.message(RoomEditState.waiting)
 async def save_room_edit(message: Message, state: FSMContext):
-    if not is_admin(str(message.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+    if not await is_admin(str(message.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         await state.clear()
         return
     
@@ -590,7 +590,7 @@ async def save_room_edit(message: Message, state: FSMContext):
             data = await state.get_data()
             from uuid import uuid4
             room_id_new = str(uuid4().hex[:8])
-            add_room(room_id_new, {
+            await add_room(room_id_new, {
                 'name': data.get('room_name', 'Yangi xona'),
                 'price': data.get('price', 200000),
                 'description': data.get('description', ''),
@@ -610,7 +610,7 @@ async def save_room_edit(message: Message, state: FSMContext):
             except:
                 await message.answer("❌ Faqat raqam!")
                 return
-        update_room(room_id, field, value)
+        await update_room(room_id, field, value)
         await state.clear()
         await message.answer("✅ Yangilandi!")
     else:
@@ -619,7 +619,7 @@ async def save_room_edit(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == "add_room_start")
 async def add_room_start(callback: CallbackQuery, state: FSMContext):
-    if not is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
     
     await state.set_state(RoomEditState.waiting)
@@ -629,10 +629,10 @@ async def add_room_start(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "hotel_info")
 async def hotel_info(callback: CallbackQuery):
-    if not is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
     
-    hotel = get_hotel()
+    hotel = await get_hotel()
     await callback.message.edit_text(
         f"""
 🏨 <b>Mehmonxona:</b>
@@ -653,7 +653,7 @@ Telegram: {hotel.get('telegram', '')}
 
 @router.callback_query(F.data.startswith("edit_hotel_"))
 async def edit_hotel(callback: CallbackQuery, state: FSMContext):
-    if not is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
     
     field = callback.data.replace("edit_hotel_", "")
@@ -664,7 +664,7 @@ async def edit_hotel(callback: CallbackQuery, state: FSMContext):
 
 @router.message(HotelEditState.waiting)
 async def save_hotel_edit(message: Message, state: FSMContext):
-    if not is_admin(str(message.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+    if not await is_admin(str(message.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         await state.clear()
         return
     
@@ -672,7 +672,7 @@ async def save_hotel_edit(message: Message, state: FSMContext):
     field = data.get("hotel_field")
     
     if field:
-        update_hotel(field, message.text.strip())
+        await update_hotel(field, message.text.strip())
     
     await state.clear()
     await message.answer("✅ Yangilandi!")
@@ -680,11 +680,11 @@ async def save_hotel_edit(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == "channels_manage")
 async def channels_manage(callback: CallbackQuery):
-    if not is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
     
-    channels = get_channels()
-    post_ch = get_post_channel()
+    channels = await get_channels()
+    post_ch = await get_post_channel()
     
     text = f"📢 <b>Kanallar:</b>\n\n"
     for ch in channels:
@@ -701,7 +701,7 @@ async def channels_manage(callback: CallbackQuery):
 
 @router.callback_query(F.data == "add_channel")
 async def add_channel(callback: CallbackQuery, state: FSMContext):
-    if not is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
     
     await state.set_state(ChannelState.waiting)
@@ -715,7 +715,7 @@ async def add_channel(callback: CallbackQuery, state: FSMContext):
 
 @router.message(ChannelState.waiting)
 async def save_channel(message: Message, state: FSMContext, bot: Bot):
-    if not is_admin(str(message.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+    if not await is_admin(str(message.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         await state.clear()
         return
     
@@ -726,7 +726,7 @@ async def save_channel(message: Message, state: FSMContext, bot: Bot):
         is_post = text.startswith("post:")
         if is_post:
             text = text.replace("post:", "").strip()
-            set_post_channel(text)
+            await set_post_channel(text)
             await state.clear()
             await message.answer("✅ Post kanali belgilandi!")
             return
@@ -747,10 +747,10 @@ async def save_channel(message: Message, state: FSMContext, bot: Bot):
 
 @router.callback_query(F.data == "post_create")
 async def post_create(callback: CallbackQuery):
-    if not is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
     
-    post_ch = get_post_channel()
+    post_ch = await get_post_channel()
     if not post_ch:
         await callback.answer("⚠️ Post kanali belgilanmagan!", show_alert=True)
         return
@@ -766,7 +766,7 @@ async def post_create(callback: CallbackQuery):
 
 @router.callback_query(F.data == "post_ai")
 async def post_ai(callback: CallbackQuery, state: FSMContext):
-    if not is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
     
     await state.set_state(PostState.waiting)
@@ -776,7 +776,7 @@ async def post_ai(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "post_manual")
 async def post_manual(callback: CallbackQuery, state: FSMContext):
-    if not is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
     
     await state.set_state(PostState.waiting)
@@ -786,7 +786,7 @@ async def post_manual(callback: CallbackQuery, state: FSMContext):
 
 @router.message(PostState.waiting)
 async def generate_post_message(message: Message, state: FSMContext, bot: Bot):
-    if not is_admin(str(message.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+    if not await is_admin(str(message.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         await state.clear()
         return
     
@@ -824,12 +824,12 @@ async def generate_post_message(message: Message, state: FSMContext, bot: Bot):
 
 @router.callback_query(F.data == "send_post")
 async def send_post(callback: CallbackQuery, state: FSMContext, bot: Bot):
-    if not is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
     
     data = await state.get_data()
     post_text = data.get("post_text", "")
-    post_ch = get_post_channel()
+    post_ch = await get_post_channel()
     
     if not post_ch:
         await callback.answer("⚠️ Kanal belgilanmagan!", show_alert=True)
@@ -847,10 +847,10 @@ async def send_post(callback: CallbackQuery, state: FSMContext, bot: Bot):
 
 @router.callback_query(F.data == "admins_list")
 async def admins_list(callback: CallbackQuery):
-    if not is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
     
-    admins = get_admins()
+    admins = await get_admins()
     super_admin = os.getenv("SUPER_ADMIN_ID", "belgilanmagan")
     
     text = f"👥 <b>Adminlar:</b>\n\n"
@@ -869,7 +869,7 @@ async def admins_list(callback: CallbackQuery):
 
 @router.callback_query(F.data == "add_admin_start")
 async def add_admin_start(callback: CallbackQuery, state: FSMContext):
-    if not is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
     
     await state.set_state(AdminManageState.waiting)
@@ -879,7 +879,7 @@ async def add_admin_start(callback: CallbackQuery, state: FSMContext):
 
 @router.message(AdminManageState.waiting)
 async def save_admin(message: Message, state: FSMContext):
-    if not is_admin(str(message.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+    if not await is_admin(str(message.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         await state.clear()
         return
     

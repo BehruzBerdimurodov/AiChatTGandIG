@@ -24,13 +24,22 @@ async def run_bot():
     from aiogram.client.default import DefaultBotProperties
     from aiogram.enums import ParseMode
     from aiogram.fsm.storage.memory import MemoryStorage
+    from aiogram.fsm.storage.redis import RedisStorage
     from bot.handlers import user, admin
+
+    redis_url = os.getenv("REDIS_URL")
+    if redis_url:
+        storage = RedisStorage.from_url(redis_url)
+        log.info("Redis orqali ulashilmoqda ✅")
+    else:
+        storage = MemoryStorage()
+        log.info("MemoryStorage orqali ulashilmoqda ⚠️ (Production uchun Redis tavsiya etiladi)")
 
     bot = Bot(
         token=os.getenv("TELEGRAM_BOT_TOKEN"),
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
-    dp = Dispatcher(storage=MemoryStorage())
+    dp = Dispatcher(storage=storage)
     dp.include_router(admin.router)
     dp.include_router(user.router)
 
@@ -69,7 +78,7 @@ async def main():
         sys.exit(1)
 
     log.info("Database tayyorlanmoqda...")
-    init_db()
+    await init_db()
     log.info("✅ Database tayyor!")
 
     log.info("Hotel AI Chatbot v4 ishga tushmoqda... 🏨")

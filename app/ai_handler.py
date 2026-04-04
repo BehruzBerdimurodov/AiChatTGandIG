@@ -21,8 +21,8 @@ TELEGRAM_BOT_LINK = "https://t.me/MarcoPoloHotelBot"
 
 
 def _build_system_prompt(user_platform: str = "telegram") -> str:
-    hotel = get_hotel()
-    rooms = get_rooms(only_active=True)
+    hotel = await get_hotel()
+    rooms = await get_rooms(only_active=True)
     
     room_lines = []
     for r in rooms:
@@ -232,7 +232,7 @@ async def get_ai_response(
         print(f"[AI] DEBUG: extract_booking_info returned None")
     
     if booking_info:
-        rooms = get_rooms(only_active=True)
+        rooms = await get_rooms(only_active=True)
         room = None
         if booking_info.get('room_type'):
             room = next((r for r in rooms if booking_info['room_type'] in r['id'].lower() or booking_info['room_type'] in r['name'].lower()), None)
@@ -302,7 +302,7 @@ async def get_ai_response(
 ❌ Rad etish uchun: <b>Rad etaman</b> deb yozing."""
                 
                 push_message(user_id, "assistant", reply)
-                log_message(user_id, "incoming", user_message, reply)
+                await log_message(user_id, "incoming", user_message, reply)
                 return reply
                 
             except Exception as e:
@@ -323,21 +323,21 @@ async def get_ai_response(
         )
         reply = response.choices[0].message.content.strip()
     except Exception as e:
-        hotel = get_hotel()
+        hotel = await get_hotel()
         reply = f"""Kechirasiz, texnik muammo yuz berdi.
 
 📞 Telefon: {hotel.get('phone', '+998773397171')}
 💬 Telegram: @Marcopolohotel_1"""
 
     push_message(user_id, "assistant", reply)
-    log_message(user_id, "incoming", user_message, reply)
-    log_activity(user_id, "chat", user_message[:50])
+    await log_message(user_id, "incoming", user_message, reply)
+    await log_activity(user_id, "chat", user_message[:50])
     
     return reply
 
 
 async def generate_post(topic: str, hotel_name: str) -> str:
-    hotel = get_hotel()
+    hotel = await get_hotel()
     prompt = f"""
 Marco Polo Hotel uchun Telegram post yozing:
 Mavzu: {topic}
@@ -360,7 +360,7 @@ Narxlar albatta
 
 
 async def generate_booking_confirmation(order_data: dict) -> str:
-    hotel = get_hotel()
+    hotel = await get_hotel()
     price_fmt = f"{order_data['total_price']:,}".replace(",", " ")
     
     return f"""
@@ -384,7 +384,7 @@ async def generate_booking_confirmation(order_data: dict) -> str:
 
 
 async def send_order_to_admins(bot, order_data: dict, admin_ids: list):
-    hotel = get_hotel()
+    hotel = await get_hotel()
     price_fmt = f"{order_data['total_price']:,}".replace(",", " ")
     
     hotel_address = hotel.get('address', "Do'mbirobod Naqqoshlik 122A")
