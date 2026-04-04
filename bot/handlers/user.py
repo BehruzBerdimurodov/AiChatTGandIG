@@ -87,27 +87,7 @@ async def check_sub_callback(callback: CallbackQuery, bot: Bot):
         await callback.answer("⚠️ Obuna tasdiqlanmadi!", show_alert=True)
 
 
-@router.message(F.text == "🏨 Xonalar")
-@router.message(F.text == "🏨 Xonalar va narxlar")
-@router.message(Command("rooms"))
-async def show_rooms(message: Message):
-    rooms = await get_rooms(only_active=True)
-    if not rooms:
-        await message.answer("😔 Hozirda xonalar mavjud emas.")
-        return
 
-    text = "<b>🏨 Xonalar va narxlar:</b>\n\n"
-    for room in rooms:
-        text += f"<b>🛏️ {room['name']}</b>\n"
-        text += f"   💰 <b>{format_price(room['price'])} so'm/kun</b>\n"
-        text += f"   📋 {room['description']}\n"
-        text += f"   👥 {room['capacity']} kishi\n\n"
-    
-    hotel = await get_hotel()
-    text += "━━━━━━━━━━━━━━━━━━\n"
-    text += f"📞 {hotel.get('phone', '+998773397171')}"
-    
-    await message.answer(text, reply_markup=rooms_inline_kb())
 
 
 @router.callback_query(F.data == "book_now")
@@ -213,82 +193,7 @@ async def room_detail(callback: CallbackQuery):
     )
 
 
-@router.message(F.text == "📍 Manzil")
-@router.message(Command("address"))
-async def show_address(message: Message):
-    await message.answer(
-        "<b>📍 Manzil:</b>\n\n"
-        "Do'mbirobod Naqqoshlik 122A\n"
-        "Toshkent, Chilonzor tumani\n\n"
-        "🗺️ Google Maps: https://maps.google.com/?q=Dombirobod+Naqqoshlik+Tashkent",
-        reply_markup=main_kb(message.from_user.id),
-    )
 
-
-@router.message(F.text == "📞 Aloqa")
-@router.message(F.text == "📞 Bog'lanish")
-@router.message(Command("contact"))
-async def show_contact(message: Message):
-    hotel = await get_hotel()
-    await message.answer(
-        f"<b>📞 Bog'lanish:</b>\n\n"
-        f"📱 Telefon 1: {hotel.get('phone', '+998773397171')}\n"
-        f"📱 Telefon 2: {hotel.get('phone_2', '+998771577171')}\n"
-        f"💬 Telegram: {hotel.get('telegram', '@Marcopolohotel_1')}\n\n"
-        f"⏰ Ishimiz 24/7!",
-        reply_markup=main_kb(message.from_user.id),
-    )
-
-
-@router.message(F.text == "💆 Xizmatlar")
-async def show_services(message: Message):
-    await message.answer(
-        "<b>💆 Xizmatlarimiz:</b>\n\n"
-        "🏊 <b>SPA SALON</b>\n"
-        "• Massaj xizmatlari\n"
-        "• Hammom va sauna\n"
-        "• Kosmetolog\n\n"
-        "🍷 <b>LOUNGE BAR</b>\n"
-        "• Premium ichimliklar\n"
-        "• Cozy atmosfera\n\n"
-        "📺 <b>Xona qulayliklari:</b>\n"
-        "• SMART TV\n"
-        "• Wi-Fi\n"
-        "• Konditsioner",
-        reply_markup=main_kb(message.from_user.id),
-    )
-
-
-@router.message(F.text == "❓ Savol berish")
-@router.message(F.text == "🤖 AI")
-@router.message(Command("help"))
-async def ask_question(message: Message):
-    user = message.from_user
-    await message.answer(
-        f"🤖 <b>Salom, {user.first_name or 'Mehmon'}!</b>\n\n"
-        f"Men sizga yordam berishga tayyorman.\n"
-        f"Shunchaki savolingizni yozing! 😊",
-        reply_markup=main_kb(message.from_user.id),
-    )
-
-
-@router.message(F.text == "📋 Bron qilish")
-async def book_from_menu(message: Message):
-    rooms = await get_rooms(only_active=True)
-    
-    buttons = []
-    for room in rooms:
-        buttons.append([InlineKeyboardButton(
-            text=f"🛏️ {room['name']} - {format_price(room['price'])} so'm",
-            callback_data=f"book_room_{room['id']}"
-        )])
-    
-    buttons.append([InlineKeyboardButton(text="◀️ Asosiy menyu", callback_data="back_main")])
-    
-    await message.answer(
-        "📋 <b>Bron qilish uchun xonani tanlang:</b>",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
-    )
 
 
 @router.message(F.text)
@@ -505,10 +410,6 @@ async def handle_all_messages(message: Message, bot: Bot):
         return
     
     if ai_data:
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Bronni tasdiqlash", callback_data="confirm_booking")],
-            [InlineKeyboardButton(text="❌ Bekor", callback_data="cancel_booking")]
-        ])
         await message.answer(
             f"📋 <b>Bron ma'lumotlari:</b>\n\n"
             f"🏨 Xona: <b>{ai_data['room_name']}</b>\n"
@@ -518,8 +419,7 @@ async def handle_all_messages(message: Message, bot: Bot):
             f"👤 {ai_data['name']}\n"
             f"📞 {ai_data['phone']}\n\n"
             f"✅ Tasdiqlash uchun 'tasdiqlayman' deb yozing\n"
-            f"yoki quyidagi tugmani bosing:",
-            reply_markup=keyboard
+            f"❌ Bekor qilish uchun 'bekor' deb yozing."
         )
         return
     

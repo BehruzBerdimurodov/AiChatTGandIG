@@ -34,8 +34,12 @@ async def _build_system_prompt(user_platform: str = "telegram") -> str:
     hotel_phone2 = hotel.get('phone_2', '+998771577171')
     hotel_address = hotel.get('address', "Do'mbirobod Naqqoshlik 122A")
 
+    platform_intro = "SIZ: Marco Polo Hotel 🏩 - Professional Telegram AI yordamchisi"
+    if user_platform == "instagram":
+        platform_intro = "SIZ: Marco Polo Hotel 🏩 - Professional Instagram Direct AI yordamchisi"
+
     return f"""
-SIZ: Marco Polo Hotel 🏩 - Professional AI yordamchi
+{platform_intro}
 
 MEHMONXONA: Marco Polo Hotel
 Manzil: {hotel_address}, Toshkent, Chilonzor tumani
@@ -323,6 +327,11 @@ async def get_ai_response(
         )
         reply = response.choices[0].message.content.strip()
     except Exception as e:
+        import traceback
+        import logging
+        log = logging.getLogger(__name__)
+        log.error(f"[AI ERROR OPENAI] {e}")
+        print(f"[AI ERROR OPENAI] Exception details:\n{traceback.format_exc()}")
         hotel = await get_hotel()
         reply = f"""Kechirasiz, texnik muammo yuz berdi.
 

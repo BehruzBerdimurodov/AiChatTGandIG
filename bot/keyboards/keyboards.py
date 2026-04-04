@@ -3,22 +3,13 @@ Barcha klaviaturalar
 """
 
 from aiogram.types import (
-    ReplyKeyboardMarkup, KeyboardButton,
+    ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
     InlineKeyboardMarkup, InlineKeyboardButton,
 )
 
 
-def main_kb(user_id: int = None) -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="🏨 Xonalar va narxlar")],
-            [KeyboardButton(text="📋 Bron qilish"), KeyboardButton(text="📍 Manzil")],
-            [KeyboardButton(text="📞 Aloqa"), KeyboardButton(text="💆 Xizmatlar")],
-            [KeyboardButton(text="❓ Savol berish")],
-        ],
-        resize_keyboard=True,
-        input_field_placeholder="Savolingizni yozing..."
-    )
+def main_kb(user_id: int = None) -> ReplyKeyboardRemove:
+    return ReplyKeyboardRemove()
 
 
 def rooms_inline_kb() -> InlineKeyboardMarkup:
@@ -36,8 +27,7 @@ def back_main_inline_kb() -> InlineKeyboardMarkup:
 
 def admin_main_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📋 Buyurtmalar", callback_data="orders_menu"),
-         InlineKeyboardButton(text="👥 Foydalanuvchilar", callback_data="users_menu")],
+        [InlineKeyboardButton(text="📋 Buyurtmalar", callback_data="orders_menu")],
         [InlineKeyboardButton(text="📊 Statistika", callback_data="stats_refresh")],
         [InlineKeyboardButton(text="🏠 Xonalar", callback_data="admin_rooms_list"),
          InlineKeyboardButton(text="🏨 Mehmonxona", callback_data="hotel_info")],

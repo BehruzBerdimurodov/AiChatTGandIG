@@ -71,8 +71,7 @@ async def admin_panel(message: Message, state: FSMContext):
     await state.clear()
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📋 Buyurtmalar", callback_data="orders_menu"),
-         InlineKeyboardButton(text="👥 Foydalanuvchilar", callback_data="users_menu")],
+        [InlineKeyboardButton(text="📋 Buyurtmalar", callback_data="orders_menu")],
         [InlineKeyboardButton(text="📊 Statistika", callback_data="stats_refresh")],
         [InlineKeyboardButton(text="🏠 Xonalar", callback_data="admin_rooms_list"),
          InlineKeyboardButton(text="🏨 Mehmonxona", callback_data="hotel_info")],
@@ -397,8 +396,7 @@ async def admin_back(callback: CallbackQuery):
         return
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📋 Buyurtmalar", callback_data="orders_menu"),
-         InlineKeyboardButton(text="👥 Foydalanuvchilar", callback_data="users_menu")],
+        [InlineKeyboardButton(text="📋 Buyurtmalar", callback_data="orders_menu")],
         [InlineKeyboardButton(text="📊 Statistika", callback_data="stats_refresh")],
         [InlineKeyboardButton(text="🏠 Xonalar", callback_data="admin_rooms_list"),
          InlineKeyboardButton(text="🏨 Mehmonxona", callback_data="hotel_info")],
