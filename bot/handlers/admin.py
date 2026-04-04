@@ -253,7 +253,7 @@ async def view_order(callback: CallbackQuery, bot: Bot):
         buttons.append([InlineKeyboardButton(text="🏁 Tugallangan", callback_data=f"order_complete_{order_id}")])
     
     if phone_clean and phone_clean.startswith('+'):
-        buttons.append([InlineKeyboardButton(text="📞 Qo'ng'iroq", url=f"https://t.me/+{phone_clean[1:]}")])
+        buttons.append([InlineKeyboardButton(text="📞 Qo'ng'iroq", url=f"tel:{phone_clean}")])
     
     buttons.append([InlineKeyboardButton(text="◀️ Orqaga", callback_data="orders_pending")])
     
@@ -732,7 +732,7 @@ async def save_channel(message: Message, state: FSMContext, bot: Bot):
         try:
             channel_id = int(text)
             chat = await bot.get_chat(channel_id)
-            db_add_channel({"channel_id": str(channel_id), "title": chat.title or str(channel_id), "username": chat.username or ""})
+            await db_add_channel({"channel_id": str(channel_id), "title": chat.title or str(channel_id), "username": chat.username or ""})
             await state.clear()
             await message.answer("✅ Kanal qo'shildi!")
         except:
@@ -885,7 +885,7 @@ async def save_admin(message: Message, state: FSMContext):
     
     if data.get("step") == "add_admin":
         admin_id = message.text.strip()
-        db_add_admin(admin_id)
+        await db_add_admin(admin_id)
         await state.clear()
         await message.answer(f"✅ Admin qo'shildi: {admin_id}")
     else:

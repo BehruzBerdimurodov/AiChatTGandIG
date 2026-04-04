@@ -239,8 +239,27 @@ async def register_user(user_id: str, user_type: str = 'telegram', first_name: s
                   last_name: str = '', username: str = '', phone: str = ''):
     async with get_db() as db:
         await db.execute("""
-            INSERT OR REPLACE INTO users (user_id, user_type, first_name, last_name, username, phone, last_activity)
+            INSERT INTO users (user_id, user_type, first_name, last_name, username, phone, last_activity)
             VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(user_id) DO UPDATE SET
+                user_type = excluded.user_type,
+                first_name = CASE
+                    WHEN excluded.first_name != '' THEN excluded.first_name
+                    ELSE users.first_name
+                END,
+                last_name = CASE
+                    WHEN excluded.last_name != '' THEN excluded.last_name
+                    ELSE users.last_name
+                END,
+                username = CASE
+                    WHEN excluded.username != '' THEN excluded.username
+                    ELSE users.username
+                END,
+                phone = CASE
+                    WHEN excluded.phone != '' THEN excluded.phone
+                    ELSE users.phone
+                END,
+                last_activity = CURRENT_TIMESTAMP
         """, (user_id, user_type, first_name, last_name, username, phone))
 
 

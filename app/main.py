@@ -6,20 +6,29 @@ Instagram va Telegram dan kelgan xabarlarni birlashtiradi
 import logging
 import os
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Header
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 from typing import Optional
-import asyncio
 
 from app.ai_handler import get_ai_response, active_users, send_order_to_admins, BOOKING_STORE
 from app.manychat import format_manychat_response
 from config.database import (
-    init_db, register_user, create_order, get_hotel, get_admins, log_activity
+    init_db, register_user, create_order, get_hotel, get_admins, log_activity, get_db, get_user_count
 )
 from datetime import datetime
 
 log = logging.getLogger(__name__)
+
+
+def require_internal_token(x_internal_token: str | None):
+    expected_token = os.getenv("INTERNAL_API_TOKEN")
+    if not expected_token:
+        log.error("INTERNAL_API_TOKEN is not configured")
+        raise HTTPException(status_code=503, detail="Internal API is not configured")
+
+    if x_internal_token != expected_token:
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
 
 @asynccontextmanager
@@ -74,10 +83,33 @@ async def root():
 
 @app.get("/health")
 async def health():
+    checks = {
+        "database": "ok",
+        "telegram_token": bool(os.getenv("TELEGRAM_BOT_TOKEN")),
+        "openai_key": bool(os.getenv("OPENAI_API_KEY")),
+        "instagram_verify_token": bool(os.getenv("INSTAGRAM_VERIFY_TOKEN")),
+        "internal_api_token": bool(os.getenv("INTERNAL_API_TOKEN")),
+    }
+
+    try:
+        async with get_db() as db:
+            await db.execute("SELECT 1")
+    except Exception as exc:
+        checks["database"] = f"error: {exc}"
+
+    is_healthy = (
+        checks["database"] == "ok"
+        and checks["telegram_token"]
+        and checks["openai_key"]
+        and checks["instagram_verify_token"]
+        and checks["internal_api_token"]
+    )
+
     return {
-        "status": "healthy",
+        "status": "healthy" if is_healthy else "degraded",
         "bot": "Marco Polo Hotel",
-        "active_users": active_users()
+        "active_users": active_users(),
+        "checks": checks,
     }
 
 
@@ -373,7 +405,11 @@ async def verify_instagram(request: Request):
     token = request.query_params.get("hub.verify_token")
     challenge = request.query_params.get("hub.challenge")
     
-    verify_token = os.getenv("INSTAGRAM_VERIFY_TOKEN", "marcopolo_verify_token")
+    verify_token = os.getenv("INSTAGRAM_VERIFY_TOKEN")
+
+    if not verify_token:
+        log.error("INSTAGRAM_VERIFY_TOKEN is not configured")
+        raise HTTPException(status_code=503, detail="Instagram verification is not configured")
     
     if mode == "subscribe" and token == verify_token:
         log.info("Instagram webhook verified successfully")
@@ -396,8 +432,10 @@ class OrderPayload(BaseModel):
 
 
 @app.post("/api/order/create")
-async def create_order_api(order: OrderPayload):
+async def create_order_api(order: OrderPayload, x_internal_token: str | None = Header(default=None)):
     """Bron qilish API"""
+    require_internal_token(x_internal_token)
+
     import uuid
     order_id = f"ORD-{uuid.uuid4().hex[:10].upper()}"
     
@@ -417,6 +455,12 @@ async def create_order_api(order: OrderPayload):
     }
     
     try:
+        await register_user(
+            user_id=order.user_id,
+            user_type="api",
+            first_name=order.name,
+            phone=order.phone,
+        )
         await create_order(order_data)
         await log_activity(order.user_id, "api_order", f"Order {order_id} created via API")
         return {"status": "success", "order_id": order_id}
@@ -428,7 +472,7 @@ async def create_order_api(order: OrderPayload):
 @app.get("/api/stats")
 async def get_stats():
     """Statistika API"""
-    from config.database import get_user_count, get_orders_count, get_monthly_stats
+    from config.database import get_monthly_stats
     
     monthly = await get_monthly_stats()
     
@@ -441,22 +485,45 @@ async def get_stats():
 
 
 @app.post("/notify/admins")
-async def notify_admins(request: Request):
+async def notify_admins(request: Request, x_internal_token: str | None = Header(default=None)):
     """Adminlarni xabardor qilish API"""
     from config.database import get_admins
-    
+
+    require_internal_token(x_internal_token)
+
     try:
         body = await request.json()
         message = body.get("message", "")
+        if not message.strip():
+            raise HTTPException(status_code=400, detail="Message is required")
         admin_ids = await get_admins()
         super_admin = os.getenv("SUPER_ADMIN_ID")
         if super_admin:
             admin_ids.extend([x.strip() for x in super_admin.split(',')])
-        
+
+        bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+        if not bot_token:
+            raise HTTPException(status_code=503, detail="Telegram bot token is not configured")
+
+        sent = 0
+        from aiogram import Bot
+
+        bot = Bot(token=bot_token)
+        for admin_id in dict.fromkeys(admin_ids):
+            try:
+                await bot.send_message(int(admin_id), message)
+                sent += 1
+            except Exception as exc:
+                log.error(f"Admin notification error for {admin_id}: {exc}")
+
         return {
             "status": "ok",
             "admins_count": len(admin_ids),
+            "sent_count": sent,
             "message_preview": message[:50]
         }
     except Exception as e:
+        if isinstance(e, HTTPException):
+            raise
+        log.error(f"Notify admins error: {e}")
         return {"status": "error", "message": str(e)}

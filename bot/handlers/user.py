@@ -349,7 +349,7 @@ async def handle_all_messages(message: Message, bot: Bot):
             )
         return
     
-    ai_data = get_booking_data(user_id)
+    ai_data = get_booking_data(f"tg_{user_id}")
     text_lower = message.text.strip().lower()
     
     if ai_data and text_lower in ['tasdiqlayman', 'tasdiq', 'ha', 'buyurtma tasdiqlayman', 'bron tasdiqlayman']:

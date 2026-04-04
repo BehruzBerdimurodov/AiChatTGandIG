@@ -420,7 +420,7 @@ async def send_order_to_admins(bot, order_data: dict, admin_ids: list):
          InlineKeyboardButton(text="❌ Bekor", callback_data=f"order_cancel_{order_data['id']}")]
     ]
     if phone_clean and phone_clean.startswith('+'):
-        keyboard_buttons.append([InlineKeyboardButton(text="📞 Qo'ng'iroq", url=f"https://t.me/+{phone_clean[1:]}")])
+        keyboard_buttons.append([InlineKeyboardButton(text="📞 Qo'ng'iroq", url=f"tel:{phone_clean}")])
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
     
