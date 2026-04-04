@@ -20,7 +20,7 @@ BOOKING_STORE: dict[str, dict] = {}
 TELEGRAM_BOT_LINK = "https://t.me/MarcoPoloHotelBot"
 
 
-def _build_system_prompt(user_platform: str = "telegram") -> str:
+async def _build_system_prompt(user_platform: str = "telegram") -> str:
     hotel = await get_hotel()
     rooms = await get_rooms(only_active=True)
     
@@ -309,7 +309,7 @@ async def get_ai_response(
                 pass
 
     messages = [
-        {"role": "system", "content": _build_system_prompt(platform)},
+        {"role": "system", "content": await _build_system_prompt(platform)},
         *history,
         {"role": "user", "content": user_message},
     ]
