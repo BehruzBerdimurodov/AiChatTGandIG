@@ -70,36 +70,43 @@ async def send_start_message(bot: Bot, chat_id: int):
     if not messages:
         return False
 
-    # Send the first start message
-    payload = messages[0]
-    msg_type = payload.get("type")
-    if msg_type == "text":
-        await bot.send_message(chat_id, payload.get("text", ""), reply_markup=main_kb(chat_id))
-    elif msg_type == "photo":
-        await bot.send_photo(chat_id, payload.get("file_id"), caption=payload.get("caption", ""), reply_markup=main_kb(chat_id))
-    elif msg_type == "video":
-        await bot.send_video(chat_id, payload.get("file_id"), caption=payload.get("caption", ""), reply_markup=main_kb(chat_id))
-    elif msg_type == "voice":
-        await bot.send_voice(chat_id, payload.get("file_id"), caption=payload.get("caption", ""), reply_markup=main_kb(chat_id))
-    elif msg_type == "document":
-        await bot.send_document(chat_id, payload.get("file_id"), caption=payload.get("caption", ""), reply_markup=main_kb(chat_id))
-    elif msg_type == "location":
-        await bot.send_location(chat_id, payload.get("lat"), payload.get("lng"), reply_markup=main_kb(chat_id))
-    elif msg_type == "media_group":
-        files = payload.get("files") or []
-        caption = payload.get("caption") or ""
-        media = []
-        for i, file_id in enumerate(files):
-            if i == 0 and caption:
-                media.append(InputMediaPhoto(media=file_id, caption=caption))
-            else:
-                media.append(InputMediaPhoto(media=file_id))
-        if media:
-            await bot.send_media_group(chat_id, media)
-    else:
-        return False
-    return True
+    sent_any = False
+    for payload in messages:
+        msg_type = payload.get("type")
+        if msg_type == "text":
+            await bot.send_message(chat_id, payload.get("text", ""))
+            sent_any = True
+        elif msg_type == "photo":
+            await bot.send_photo(chat_id, payload.get("file_id"), caption=payload.get("caption", ""))
+            sent_any = True
+        elif msg_type == "video":
+            await bot.send_video(chat_id, payload.get("file_id"), caption=payload.get("caption", ""))
+            sent_any = True
+        elif msg_type == "voice":
+            await bot.send_voice(chat_id, payload.get("file_id"), caption=payload.get("caption", ""))
+            sent_any = True
+        elif msg_type == "document":
+            await bot.send_document(chat_id, payload.get("file_id"), caption=payload.get("caption", ""))
+            sent_any = True
+        elif msg_type == "location":
+            await bot.send_location(chat_id, payload.get("lat"), payload.get("lng"))
+            sent_any = True
+        elif msg_type == "media_group":
+            files = payload.get("files") or []
+            caption = payload.get("caption") or ""
+            media = []
+            for i, file_id in enumerate(files):
+                if i == 0 and caption:
+                    media.append(InputMediaPhoto(media=file_id, caption=caption))
+                else:
+                    media.append(InputMediaPhoto(media=file_id))
+            if media:
+                await bot.send_media_group(chat_id, media)
+                sent_any = True
+        else:
+            continue
 
+    return sent_any
 
 class OnboardState(StatesGroup):
     name = State()
