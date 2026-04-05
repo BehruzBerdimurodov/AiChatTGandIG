@@ -25,6 +25,33 @@ router = Router()
 booking_store = {}
 
 
+def _collect_admin_ids(db_admins: list[str], super_admin_env: str) -> list[int]:
+    ids: list[int] = []
+    for admin_id in db_admins:
+        try:
+            ids.append(int(str(admin_id).strip()))
+        except Exception:
+            continue
+    if super_admin_env:
+        for raw in super_admin_env.split(","):
+            raw = raw.strip()
+            if not raw:
+                continue
+            try:
+                ids.append(int(raw))
+            except Exception:
+                continue
+    # unique while preserving order
+    seen = set()
+    unique_ids = []
+    for aid in ids:
+        if aid in seen:
+            continue
+        seen.add(aid)
+        unique_ids.append(aid)
+    return unique_ids
+
+
 def format_price(price: int) -> str:
     return f"{price:,}".replace(",", " ")
 
@@ -241,12 +268,14 @@ async def handle_all_messages(message: Message, bot: Bot):
             
             admins = await get_admins()
             super_admin = os.getenv("SUPER_ADMIN_ID", "")
-            if super_admin:
-                admins.extend([x.strip() for x in super_admin.split(',')])
-            
+            admin_ids = _collect_admin_ids(admins, super_admin)
+
             from app.ai_handler import send_order_to_admins
-            if admins:
-                await send_order_to_admins(bot, order_data, admins)
+            if admin_ids:
+                try:
+                    await send_order_to_admins(bot, order_data, admin_ids)
+                except Exception as e:
+                    log.error(f"Admin notify error: {e}")
             
             clear_booking_data(f"tg_{user_id}")
             
@@ -380,12 +409,14 @@ async def handle_all_messages(message: Message, bot: Bot):
         
         admins = await get_admins()
         super_admin = os.getenv("SUPER_ADMIN_ID", "")
-        if super_admin:
-            admins.extend([x.strip() for x in super_admin.split(',')])
-        
+        admin_ids = _collect_admin_ids(admins, super_admin)
+
         from app.ai_handler import send_order_to_admins
-        if admins:
-            await send_order_to_admins(bot, order_data, admins)
+        if admin_ids:
+            try:
+                await send_order_to_admins(bot, order_data, admin_ids)
+            except Exception as e:
+                log.error(f"Admin notify error: {e}")
         
         clear_booking_data(f"tg_{user_id}")
         
@@ -490,12 +521,14 @@ async def confirm_booking(callback: CallbackQuery, bot: Bot):
     
     admins = await get_admins()
     super_admin = os.getenv("SUPER_ADMIN_ID", "")
-    if super_admin:
-        admins.extend([x.strip() for x in super_admin.split(',')])
-    
+    admin_ids = _collect_admin_ids(admins, super_admin)
+
     from app.ai_handler import send_order_to_admins
-    if admins:
-        await send_order_to_admins(bot, order_data, admins)
+    if admin_ids:
+        try:
+            await send_order_to_admins(bot, order_data, admin_ids)
+        except Exception as e:
+            log.error(f"Admin notify error: {e}")
     
     await log_activity(user_id, "booking", f"Order {order_id}")
     

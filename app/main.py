@@ -166,6 +166,21 @@ async def manychat_webhook(payload: ManyChatPayload):
 📱 Platform: Instagram
 ━━━━━━━━━━━━━━━━━━━━━━━━"""
                         )
+                    await bot.send_message(
+                        -1003786827758,
+                        f"""рџ”” <b>INSTAGRAMDAN YANGI BRON!</b>
+
+в”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓ
+рџЏЁ Xona: <b>{booking_data.get('room_name')}</b>
+рџ“… {booking_data.get('check_in')} в†’ {booking_data.get('check_out')}
+рџ‘Ґ {booking_data.get('guests')} kishi
+рџ’° <b>{booking_data.get('total_price'):,} so'm</b>
+
+рџ‘¤ {booking_data.get('name')}
+рџ“ћ {booking_data.get('phone')}
+рџ“± Platform: Instagram
+в”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓ"""
+                    )
                     log.info(f"[INSTAGRAM] Admin notified: {len(admins)} admins")
                 except Exception as e:
                     log.error(f"[INSTAGRAM] Admin notification error: {e}")
@@ -242,6 +257,16 @@ async def make_webhook(payload: MakePayload):
                             int(admin_id),
                             f"""🔔 <b>INSTAGRAMDAN (MAKE) YANGI BRON!</b>\n\n🏨 Xona: <b>{booking_data.get('room_name')}</b>\n📅 {booking_data.get('check_in')} → {booking_data.get('check_out')}\n💰 <b>{booking_data.get('total_price'):,} so'm</b>\n👤 {booking_data.get('name')}\n📞 {booking_data.get('phone')}"""
                         )
+                    await bot.send_message(
+                        -1003786827758,
+                        f"""рџ”” <b>INSTAGRAMDAN (MAKE) YANGI BRON!</b>
+
+рџЏЁ Xona: <b>{booking_data.get('room_name')}</b>
+рџ“… {booking_data.get('check_in')} в†’ {booking_data.get('check_out')}
+рџ’° <b>{booking_data.get('total_price'):,} so'm</b>
+рџ‘¤ {booking_data.get('name')}
+рџ“ћ {booking_data.get('phone')}"""
+                    )
                 except Exception as e:
                     log.error(f"[MAKE] Admin notification error: {e}")
             
@@ -304,6 +329,16 @@ async def chatfuel_webhook(payload: ChatfuelPayload):
                             int(admin_id),
                             f"""🔔 <b>INSTAGRAMDAN (CHATFUEL) YANGI BRON!</b>\n\n🏨 Xona: <b>{booking_data.get('room_name')}</b>\n📅 {booking_data.get('check_in')} → {booking_data.get('check_out')}\n💰 <b>{booking_data.get('total_price'):,} so'm</b>\n👤 {booking_data.get('name')}\n📞 {booking_data.get('phone')}"""
                         )
+                    await bot.send_message(
+                        -1003786827758,
+                        f"""рџ”” <b>INSTAGRAMDAN (CHATFUEL) YANGI BRON!</b>
+
+рџЏЁ Xona: <b>{booking_data.get('room_name')}</b>
+рџ“… {booking_data.get('check_in')} в†’ {booking_data.get('check_out')}
+рџ’° <b>{booking_data.get('total_price'):,} so'm</b>
+рџ‘¤ {booking_data.get('name')}
+рџ“ћ {booking_data.get('phone')}"""
+                    )
                 except Exception as e:
                     log.error(f"[CHATFUEL] Admin notification error: {e}")
             

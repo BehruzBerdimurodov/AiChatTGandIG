@@ -18,7 +18,7 @@ from config.database import (
     get_hotel, update_hotel, get_channels, add_channel as db_add_channel, remove_channel,
     get_post_channel, set_post_channel, add_admin as db_add_admin, remove_admin as db_remove_admin, get_admins,
     get_user_count, get_orders, get_order, update_order, get_all_users,
-    get_daily_stats, get_monthly_stats, log_activity
+    get_daily_stats, get_monthly_stats, log_activity, find_available_rooms
 )
 from bot.keyboards.keyboards import admin_main_kb
 
@@ -58,6 +58,10 @@ class PostState(StatesGroup):
     waiting = State()
 
 
+class AvailabilityState(StatesGroup):
+    waiting = State()
+
+
 ADMIN_IN_ADMIN_MODE = set()
 
 
@@ -71,12 +75,12 @@ async def admin_panel(message: Message, state: FSMContext):
     await state.clear()
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📋 Buyurtmalar", callback_data="orders_menu")],
         [InlineKeyboardButton(text="📊 Statistika", callback_data="stats_refresh")],
         [InlineKeyboardButton(text="🏠 Xonalar", callback_data="admin_rooms_list"),
          InlineKeyboardButton(text="🏨 Mehmonxona", callback_data="hotel_info")],
         [InlineKeyboardButton(text="📢 Kanallar", callback_data="channels_manage"),
          InlineKeyboardButton(text="📝 Post", callback_data="post_create")],
+        [InlineKeyboardButton(text="🟢 Bo'sh xonalar", callback_data="available_rooms")],
         [InlineKeyboardButton(text="👥 Adminlar", callback_data="admins_list")],
         [InlineKeyboardButton(text="🚪 Chiqish", callback_data="admin_logout")],
     ])
@@ -152,6 +156,7 @@ async def orders_menu(callback: CallbackQuery):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⏳ Kutilayotgan", callback_data="orders_pending"),
          InlineKeyboardButton(text="✅ Tasdiqlangan", callback_data="orders_confirmed")],
+        [InlineKeyboardButton(text="📋 Barchasi", callback_data="orders_all")],
         [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")],
     ])
     
@@ -396,12 +401,12 @@ async def admin_back(callback: CallbackQuery):
         return
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📋 Buyurtmalar", callback_data="orders_menu")],
         [InlineKeyboardButton(text="📊 Statistika", callback_data="stats_refresh")],
         [InlineKeyboardButton(text="🏠 Xonalar", callback_data="admin_rooms_list"),
          InlineKeyboardButton(text="🏨 Mehmonxona", callback_data="hotel_info")],
         [InlineKeyboardButton(text="📢 Kanallar", callback_data="channels_manage"),
          InlineKeyboardButton(text="📝 Post", callback_data="post_create")],
+        [InlineKeyboardButton(text="🟢 Bo'sh xonalar", callback_data="available_rooms")],
         [InlineKeyboardButton(text="👥 Adminlar", callback_data="admins_list")],
         [InlineKeyboardButton(text="🚪 Chiqish", callback_data="admin_logout")],
     ])
@@ -859,6 +864,7 @@ async def admins_list(callback: CallbackQuery):
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="➕ Qo'shish", callback_data="add_admin_start")],
+        [InlineKeyboardButton(text="➖ O'chirish", callback_data="remove_admin_start")],
         [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")]
     ])
     
@@ -875,6 +881,16 @@ async def add_admin_start(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text("➕ Yangi admin ID sini yuboring:")
 
 
+@router.callback_query(F.data == "remove_admin_start")
+async def remove_admin_start(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+        return
+
+    await state.set_state(AdminManageState.waiting)
+    await state.update_data(step="remove_admin")
+    await callback.message.edit_text("➖ O'chiriladigan admin ID sini yuboring:")
+
+
 @router.message(AdminManageState.waiting)
 async def save_admin(message: Message, state: FSMContext):
     if not await is_admin(str(message.from_user.id), os.getenv("SUPER_ADMIN_ID")):
@@ -888,5 +904,66 @@ async def save_admin(message: Message, state: FSMContext):
         await db_add_admin(admin_id)
         await state.clear()
         await message.answer(f"✅ Admin qo'shildi: {admin_id}")
+    elif data.get("step") == "remove_admin":
+        admin_id = message.text.strip()
+        await db_remove_admin(admin_id)
+        await state.clear()
+        await message.answer(f"✅ Admin o'chirildi: {admin_id}")
     else:
         await state.clear()
+
+
+@router.callback_query(F.data == "available_rooms")
+async def available_rooms_start(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+        return
+
+    await state.set_state(AvailabilityState.waiting)
+    await callback.message.edit_text(
+        "🟢 Bo'sh xonalar\n\n"
+        "Sanalarni yuboring:\n"
+        "Format: 2026-04-10 2026-04-12"
+    )
+
+
+@router.message(AvailabilityState.waiting)
+async def available_rooms_show(message: Message, state: FSMContext):
+    if not await is_admin(str(message.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+        await state.clear()
+        return
+
+    text = message.text.strip()
+    parts = text.split()
+    if len(parts) != 2:
+        await message.answer("❌ Format xato. Masalan: 2026-04-10 2026-04-12")
+        return
+
+    check_in, check_out = parts[0], parts[1]
+    if not _validate_date(check_in) or not _validate_date(check_out):
+        await message.answer("❌ Sana noto'g'ri! Format: YYYY-MM-DD")
+        return
+
+    rooms = await find_available_rooms(check_in, check_out, only_active=True)
+    await state.clear()
+
+    if not rooms:
+        await message.answer("❌ Bu sanalarda bo'sh xona topilmadi.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")]
+        ]))
+        return
+
+    lines = [f"✅ Bo'sh xonalar ({check_in} → {check_out}):"]
+    for room in rooms:
+        lines.append(f"- {room.get('name')} | {format_price(room.get('price', 0))} so'm/kun")
+
+    await message.answer("\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")]
+    ]))
+
+
+def _validate_date(date_str: str) -> bool:
+    try:
+        datetime.strptime(date_str, '%Y-%m-%d')
+        return True
+    except Exception:
+        return False
