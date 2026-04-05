@@ -351,6 +351,51 @@ async def get_ai_response(
         BOOKING_DRAFT[user_id] = draft
 
     if draft:
+        # If last step said "other date or room", handle explicit choice
+        if draft.get("availability_needed"):
+            has_room_update = bool(
+                booking_info and (booking_info.get("room_type") or booking_info.get("room_choice_index"))
+            )
+            has_date_update = bool(
+                booking_info and (booking_info.get("check_in") or booking_info.get("check_out"))
+            )
+            if has_room_update or has_date_update:
+                draft.pop("availability_needed", None)
+                draft.pop("available_rooms", None)
+                BOOKING_DRAFT[user_id] = draft
+            else:
+                if "xona" in text_lower or "room" in text_lower:
+                    draft["room_type"] = None
+                    draft["room_choice_index"] = None
+                    draft.pop("room_id", None)
+                    draft.pop("availability_needed", None)
+                    available_rooms = draft.pop("available_rooms", None) or []
+                    BOOKING_DRAFT[user_id] = draft
+                    if available_rooms:
+                        lines = ["Mavjud xonalar:"]
+                        for idx, room in enumerate(available_rooms, start=1):
+                            price = f"{room.get('price', 0):,}".replace(",", " ")
+                            lines.append(
+                                f"{idx}. {room.get('name')} - {price} so'm/kun | {room.get('capacity', 1)} kishi"
+                            )
+                        lines.append("Qaysi xonani tanlaysiz? (nom yoki raqam)")
+                        reply = "\n".join(lines)
+                    else:
+                        reply = "Qaysi xona kerak? (masalan: Standart, Deluxe, Suite yoki royxatdagi raqam bilan)"
+                    push_message(user_id, "assistant", reply)
+                    await log_message(user_id, "incoming", user_message, reply)
+                    return reply
+                if "sana" in text_lower or "date" in text_lower:
+                    draft["check_in"] = None
+                    draft["check_out"] = None
+                    draft.pop("availability_needed", None)
+                    draft.pop("available_rooms", None)
+                    BOOKING_DRAFT[user_id] = draft
+                    reply = "Kelish sanasini yuboring (YYYY-MM-DD)."
+                    push_message(user_id, "assistant", reply)
+                    await log_message(user_id, "incoming", user_message, reply)
+                    return reply
+
         # Prefill name/phone from DB for Telegram users to avoid extra prompts
         if user_id.startswith("tg_"):
             db_user = await get_user(user_id.replace("tg_", ""))
@@ -511,8 +556,14 @@ async def get_ai_response(
                     f"Mavjud xonalar: {room_names}. "
                     "Boshqa sana yoki xona tanlaysizmi?"
                 )
+                draft["availability_needed"] = True
+                draft["available_rooms"] = available_rooms
+                BOOKING_DRAFT[user_id] = draft
             else:
                 reply = "Afsus, bu sanalarda bo'sh xona yo'q. Boshqa sana aytasizmi?"
+                draft["availability_needed"] = True
+                draft["available_rooms"] = []
+                BOOKING_DRAFT[user_id] = draft
             push_message(user_id, "assistant", reply)
             await log_message(user_id, "incoming", user_message, reply)
             return reply
