@@ -337,6 +337,16 @@ async def get_ai_response(
 
     draft = BOOKING_DRAFT.get(user_id, {})
     if booking_info:
+        # If we already have check-in and user sends a single date next,
+        # treat it as check-out instead of overwriting check-in.
+        if (
+            booking_info.get("check_in")
+            and not booking_info.get("check_out")
+            and draft.get("check_in")
+            and not draft.get("check_out")
+        ):
+            booking_info["check_out"] = booking_info["check_in"]
+            booking_info["check_in"] = None
         draft = _merge_booking(draft, booking_info)
         BOOKING_DRAFT[user_id] = draft
 
