@@ -378,12 +378,19 @@ async def get_ai_response(
 
         # If we are waiting for guests, accept "2" or "2 kishi" forms
         if missing == "guests":
-            guest_match = re.search(r'(\d+)', user_message)
-            if guest_match:
-                draft['guests'] = int(guest_match.group(1))
+            text_norm = user_message.strip().lower()
+            has_date_words = any(m in text_norm for m in ["yanvar","fevral","mart","aprel","may","iyun","iyul","avgust","sentabr","oktabr","noyabr","dekabr"])
+            has_date_pattern = bool(re.search(r"\d{4}[-./]\d{1,2}[-./]\d{1,2}", text_norm))
+            explicit_guest = re.search(r"(\d+)\s*(kishi|odam|mehmon|kishilik)", text_norm)
+            pure_number = re.fullmatch(r"\d+", text_norm)
+            if explicit_guest:
+                draft["guests"] = int(explicit_guest.group(1))
                 BOOKING_DRAFT[user_id] = draft
                 missing = _next_missing_field(draft)
-
+            elif pure_number and not (has_date_words or has_date_pattern):
+                draft["guests"] = int(text_norm)
+                BOOKING_DRAFT[user_id] = draft
+                missing = _next_missing_field(draft)
         # If user is sending a phone but format is wrong, show explicit error
         if missing == "phone":
             phone_candidate = user_message.strip()
