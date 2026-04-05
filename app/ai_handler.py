@@ -7,7 +7,7 @@ import os
 import re
 from datetime import datetime
 from openai import AsyncOpenAI
-from config.database import get_hotel, get_rooms, get_room, create_order, log_message, log_activity, register_user, get_admins
+from config.database import get_hotel, get_rooms, get_room, create_order, log_message, log_activity, register_user, get_admins, find_available_rooms
 
 client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
@@ -63,6 +63,10 @@ BRON QILISHDA QUYIDAGI TARTIBDA MALUMOT SO'RANG:
 4. Ketish sanasini so'rang
 5. Necha kishi ekanligini so'rang
 6. Telefon raqamini so'rang
+
+AGAR "BO'SH XONA" DEB SO'RASA:
+- Avval kelish va ketish sanasini so'rang
+- Sanalar berilsa, mavjud xonalarni ayting
 
 AGAR MALUMOT TO'LIQ BO'LSA:
 ✅ Qabul qiling va quyidagi xabarni yuboring:
@@ -236,12 +240,45 @@ async def get_ai_response(
         print(f"[AI] DEBUG: extract_booking_info returned None")
     
     if booking_info:
-        rooms = await get_rooms(only_active=True)
         room = None
+        available_rooms = await find_available_rooms(
+            booking_info['check_in'],
+            booking_info['check_out'],
+            only_active=True
+        )
+
         if booking_info.get('room_type'):
-            room = next((r for r in rooms if booking_info['room_type'] in r['id'].lower() or booking_info['room_type'] in r['name'].lower()), None)
-        if not room and rooms:
-            room = rooms[0]
+            room = next(
+                (
+                    r for r in available_rooms
+                    if booking_info['room_type'] in r['id'].lower()
+                    or booking_info['room_type'] in r['name'].lower()
+                ),
+                None
+            )
+            if not room:
+                if available_rooms:
+                    room_names = ", ".join(r["name"] for r in available_rooms)
+                    reply = (
+                        "Tanlangan xona bu sanalarda band. "
+                        f"Mavjud xonalar: {room_names}. "
+                        "Boshqa sana yoki xona tanlaysizmi?"
+                    )
+                    push_message(user_id, "assistant", reply)
+                    await log_message(user_id, "incoming", user_message, reply)
+                    return reply
+                reply = "Afsus, bu sanalarda bo'sh xona yo'q. Boshqa sana aytasizmi?"
+                push_message(user_id, "assistant", reply)
+                await log_message(user_id, "incoming", user_message, reply)
+                return reply
+        else:
+            room = available_rooms[0] if available_rooms else None
+
+        if not room:
+            reply = "Afsus, bu sanalarda bo'sh xona yo'q. Boshqa sana aytasizmi?"
+            push_message(user_id, "assistant", reply)
+            await log_message(user_id, "incoming", user_message, reply)
+            return reply
         
         if room:
             try:

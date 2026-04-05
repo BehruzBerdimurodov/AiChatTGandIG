@@ -14,7 +14,7 @@ from typing import Optional
 from app.ai_handler import get_ai_response, active_users, send_order_to_admins, BOOKING_STORE
 from app.manychat import format_manychat_response
 from config.database import (
-    init_db, register_user, create_order, get_hotel, get_admins, log_activity, get_db, get_user_count
+    init_db, register_user, create_order, get_hotel, get_admins, log_activity, get_db, get_user_count, is_room_available
 )
 from datetime import datetime
 
@@ -455,6 +455,10 @@ async def create_order_api(order: OrderPayload, x_internal_token: str | None = H
     }
     
     try:
+        available = await is_room_available(order.room_id, order.check_in, order.check_out)
+        if not available:
+            raise HTTPException(status_code=409, detail="Room is not available for the selected dates")
+
         await register_user(
             user_id=order.user_id,
             user_type="api",

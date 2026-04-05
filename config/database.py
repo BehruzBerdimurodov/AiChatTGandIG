@@ -355,6 +355,55 @@ async def get_revenue(month: str = None) -> int:
                 return row[0] if row[0] else 0
 
 
+async def is_room_available(room_id: str, check_in: str, check_out: str) -> bool:
+    try:
+        start = datetime.strptime(check_in, "%Y-%m-%d").date()
+        end = datetime.strptime(check_out, "%Y-%m-%d").date()
+    except Exception:
+        return False
+
+    if end <= start:
+        return False
+
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT check_in, check_out, status FROM orders WHERE room_id = ? AND status != 'cancelled'",
+            (room_id,)
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+    for row in rows:
+        try:
+            existing_start = datetime.strptime(row["check_in"], "%Y-%m-%d").date()
+            existing_end = datetime.strptime(row["check_out"], "%Y-%m-%d").date()
+        except Exception:
+            continue
+
+        # Overlap if start < existing_end and end > existing_start
+        if start < existing_end and end > existing_start:
+            return False
+
+    return True
+
+
+async def find_available_rooms(check_in: str, check_out: str, only_active: bool = True) -> List[Dict]:
+    rooms = await get_rooms(only_active=only_active)
+    available = []
+    for room in rooms:
+        if await is_room_available(room["id"], check_in, check_out):
+            available.append(room)
+    return available
+    async with get_db() as db:
+        if month:
+            async with db.execute("SELECT SUM(total_price) FROM orders WHERE status = 'completed' AND created_at LIKE ?", (f'{month}%',)) as cursor:
+                row = await cursor.fetchone()
+                return row[0] if row[0] else 0
+        else:
+            async with db.execute("SELECT SUM(total_price) FROM orders WHERE status = 'completed'") as cursor:
+                row = await cursor.fetchone()
+                return row[0] if row[0] else 0
+
+
 async def get_admins() -> List[str]:
     async with get_db() as db:
         async with db.execute("SELECT user_id FROM admins") as cursor:
