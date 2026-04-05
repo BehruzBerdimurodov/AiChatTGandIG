@@ -143,13 +143,15 @@ def extract_booking_info(text: str) -> dict | None:
     month_map = {
         'yanvar': '01', 'fevral': '02', 'mart': '03', 'aprel': '04',
         'may': '05', 'iyun': '06', 'iyul': '07', 'avgust': '08',
-        'sentabr': '09', 'oktabr': '10', 'noyabr': '11', 'dekabr': '12'
+        'sentabr': '09', 'sentyabr': '09',
+        'oktabr': '10', 'oktyabr': '10',
+        'noyabr': '11', 'dekabr': '12'
     }
     
     year = datetime.now().year
     
     date_patterns = [
-        r'(\d{1,2})\s*(?:dekabr|yanvar|fevral|mart|aprel|may|iyun|iyul|avgust|sentabr|oktabr|noyabr)',
+        r'(\d{1,2})\s*(?:dekabr|yanvar|fevral|mart|aprel|may|iyun|iyul|avgust|sentabr|sentyabr|oktabr|oktyabr|noyabr)',
         r'(\d{4})[-./](\d{2})[-./](\d{2})',
         r'(\d{1,2})[-./](\d{1,2})[-./](\d{2,4})',
     ]
@@ -273,6 +275,24 @@ async def get_ai_response(
 
     booking_info = extract_booking_info(user_message)
     text_lower = user_message.lower().strip()
+
+    # Greeting: clear any stale draft so it doesn't force date questions
+    if not booking_info and any(
+        phrase in text_lower
+        for phrase in [
+            "salom",
+            "assalomu alaykum",
+            "ассалому алайкум",
+            "hello",
+            "hi",
+        ]
+    ):
+        BOOKING_DRAFT.pop(user_id, None)
+        BOOKING_STORE.pop(user_id, None)
+        reply = "Salom! Sizga qaysi xona kerak? (masalan: Standart, Deluxe, Suite yoki royxatdagi raqam bilan)"
+        push_message(user_id, "assistant", reply)
+        await log_message(user_id, "incoming", user_message, reply)
+        return reply
 
     # Start-over intent: user wants to begin a new booking
     if any(
