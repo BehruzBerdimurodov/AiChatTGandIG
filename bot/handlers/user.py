@@ -9,7 +9,7 @@ import os
 from datetime import datetime
 from aiogram import Router, F, Bot
 from aiogram.filters import CommandStart, Command
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InputMediaPhoto
 from aiogram.enums import ChatAction
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -60,14 +60,18 @@ def format_price(price: int) -> str:
 
 
 async def send_start_message(bot: Bot, chat_id: int):
-    raw = await get_setting("start_message")
+    raw = await get_setting("start_messages")
     if not raw:
         return False
     try:
-        payload = json.loads(raw)
+        messages = json.loads(raw)
     except Exception:
         return False
+    if not messages:
+        return False
 
+    # Send the first start message
+    payload = messages[0]
     msg_type = payload.get("type")
     if msg_type == "text":
         await bot.send_message(chat_id, payload.get("text", ""), reply_markup=main_kb(chat_id))
@@ -81,6 +85,17 @@ async def send_start_message(bot: Bot, chat_id: int):
         await bot.send_document(chat_id, payload.get("file_id"), caption=payload.get("caption", ""), reply_markup=main_kb(chat_id))
     elif msg_type == "location":
         await bot.send_location(chat_id, payload.get("lat"), payload.get("lng"), reply_markup=main_kb(chat_id))
+    elif msg_type == "media_group":
+        files = payload.get("files") or []
+        caption = payload.get("caption") or ""
+        media = []
+        for i, file_id in enumerate(files):
+            if i == 0 and caption:
+                media.append(InputMediaPhoto(media=file_id, caption=caption))
+            else:
+                media.append(InputMediaPhoto(media=file_id))
+        if media:
+            await bot.send_media_group(chat_id, media)
     else:
         return False
     return True
@@ -130,8 +145,7 @@ Masalan: Behruz Berdimurodov""",
     )
     await log_activity(user_id, "start", f"/start")
 
-    if await send_start_message(bot, message.chat.id):
-        return
+    await send_start_message(bot, message.chat.id)
 
     hotel = await get_hotel()
     name = existing.get("first_name") or user.first_name or "Mehmon"
@@ -202,8 +216,7 @@ async def onboard_contact(message: Message, state: FSMContext):
     address = hotel.get("address", "Do'mbirobod Naqqoshlik 121A")
     phone_main = hotel.get("phone", "+998773397171")
 
-    if await send_start_message(message.bot, message.chat.id):
-        return
+    await send_start_message(message.bot, message.chat.id)
 
     await message.answer(
         f"""Rahmat! Ma'lumotlar saqlandi.

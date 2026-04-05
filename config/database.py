@@ -538,3 +538,8 @@ async def set_setting(key: str, value: str):
                 value = excluded.value,
                 updated_at = CURRENT_TIMESTAMP
         """, (key, value))
+
+
+async def delete_setting(key: str):
+    async with get_db() as db:
+        await db.execute("DELETE FROM settings WHERE key = ?", (key,))

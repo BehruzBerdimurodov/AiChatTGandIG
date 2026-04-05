@@ -4,14 +4,14 @@ Admin Panel Handler - /admin orqali kirish
 
 import logging
 import json
-import json
 import os
+import asyncio
 from datetime import datetime
 from aiogram import Router, F, Bot
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
 
 from app.ai_handler import generate_post, active_users
 from config.database import is_admin
@@ -20,12 +20,15 @@ from config.database import (
     get_hotel, update_hotel, get_channels, add_channel as db_add_channel, remove_channel,
     get_post_channel, set_post_channel, add_admin as db_add_admin, remove_admin as db_remove_admin, get_admins,
     get_user_count, get_orders, get_order, update_order, get_all_users,
-    get_daily_stats, get_monthly_stats, log_activity, find_available_rooms, set_setting
+    get_daily_stats, get_monthly_stats, log_activity, find_available_rooms, set_setting, get_setting, delete_setting
 )
 from bot.keyboards.keyboards import admin_main_kb
 
 log = logging.getLogger(__name__)
 router = Router()
+
+START_MEDIA_GROUPS: dict[tuple[int, str], dict] = {}
+POST_MEDIA_GROUPS: dict[tuple[int, str], dict] = {}
 
 
 def format_price(price: int) -> str:
@@ -65,6 +68,10 @@ class AvailabilityState(StatesGroup):
 
 
 class StartMessageState(StatesGroup):
+    waiting = State()
+
+
+class StartMessageDeleteState(StatesGroup):
     waiting = State()
 
 
@@ -792,7 +799,7 @@ async def post_manual(callback: CallbackQuery, state: FSMContext):
     
     await state.set_state(PostState.waiting)
     await state.update_data(step="post_manual")
-    await callback.message.edit_text("✍️ Post matnini yozing:")
+    await callback.message.edit_text("✍️ Post matnini yozing yoki rasm/album yuboring (caption bilan).")
 
 
 @router.message(PostState.waiting)
@@ -819,15 +826,31 @@ async def generate_post_message(message: Message, state: FSMContext, bot: Bot):
         await message.answer(f"📝 <b>Tayyor post:</b>\n\n{post_text}", reply_markup=keyboard)
         
     elif step == "post_manual":
-        await state.update_data(post_text=message.text, step="post_preview")
+        if message.media_group_id and message.photo:
+            await _collect_post_media_group(message, state)
+            return
+        if message.photo:
+            await state.update_data(
+                post_media=[message.photo[-1].file_id],
+                post_caption=message.caption or "",
+                step="post_preview"
+            )
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="✅ Yuborish", callback_data="send_post")],
+                [InlineKeyboardButton(text="❌ Bekor", callback_data="admin_back")]
+            ])
+            await message.answer("📝 <b>Post:</b>\n\nRasm qabul qilindi.", reply_markup=keyboard)
+            return
+
+        await state.update_data(post_text=message.text or "", step="post_preview")
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="✅ Yuborish", callback_data="send_post")],
             [InlineKeyboardButton(text="❌ Bekor", callback_data="admin_back")]
         ])
         
-        await message.answer(f"📝 <b>Post:</b>\n\n{message.text}", reply_markup=keyboard)
-    
+        text = message.text or ""
+        await message.answer(f"📝 <b>Post:</b>\n\n{text}", reply_markup=keyboard)
     elif step == "post_preview":
         await state.clear()
         await message.answer("❌ Bekor qilindi.")
@@ -840,6 +863,8 @@ async def send_post(callback: CallbackQuery, state: FSMContext, bot: Bot):
     
     data = await state.get_data()
     post_text = data.get("post_text", "")
+    post_media = data.get("post_media")
+    post_caption = data.get("post_caption", "")
     post_ch = await get_post_channel()
     
     if not post_ch:
@@ -847,7 +872,17 @@ async def send_post(callback: CallbackQuery, state: FSMContext, bot: Bot):
         return
     
     try:
-        await bot.send_message(int(post_ch), post_text)
+        if post_media:
+            media = []
+            caption = post_text or post_caption or ""
+            for i, file_id in enumerate(post_media):
+                if i == 0 and caption:
+                    media.append(InputMediaPhoto(media=file_id, caption=caption))
+                else:
+                    media.append(InputMediaPhoto(media=file_id))
+            await bot.send_media_group(int(post_ch), media)
+        else:
+            await bot.send_message(int(post_ch), post_text)
         await callback.answer("✅ Yuborildi!", show_alert=True)
         await callback.message.edit_text("✅ Post kanalga yuborildi!")
     except:
@@ -959,13 +994,53 @@ async def available_rooms_show(message: Message, state: FSMContext):
 async def start_message(callback: CallbackQuery, state: FSMContext):
     if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
+    raw = await get_setting("start_messages")
+    messages = []
+    if raw:
+        try:
+            messages = json.loads(raw)
+        except Exception:
+            messages = []
+
+    lines = ["Start xabarlar:"]
+    if messages:
+        for i, msg in enumerate(messages, start=1):
+            msg_type = msg.get("type", "text")
+            preview = msg.get("text") or msg.get("caption") or msg_type
+            preview = preview.replace("\n", " ")[:40]
+            lines.append(f"{i}. [{msg_type}] {preview}")
+    else:
+        lines.append("Hozircha start xabar yo'q.")
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Yangi qo'shish", callback_data="start_message_add")],
+        [InlineKeyboardButton(text="🗑 O'chirish", callback_data="start_message_delete")],
+        [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")]
+    ])
+
+    await callback.message.edit_text("\n".join(lines), reply_markup=keyboard)
+
+
+@router.callback_query(F.data == "start_message_add")
+async def start_message_add(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+        return
 
     await state.set_state(StartMessageState.waiting)
     await callback.message.edit_text(
         "Start xabarni yuboring.\n"
-        "Matn, rasm+matn, voice, video, dokument yoki location bo'lishi mumkin.\n"
+        "Matn, rasm/album+matn, voice, video, dokument yoki location bo'lishi mumkin.\n"
         "Shu xabar /start bosilganda yuboriladi."
     )
+
+
+@router.callback_query(F.data == "start_message_delete")
+async def start_message_delete(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+        return
+
+    await state.set_state(StartMessageDeleteState.waiting)
+    await callback.message.edit_text("O'chirish uchun start xabar raqamini yuboring (masalan: 1)")
 
 
 @router.message(StartMessageState.waiting)
@@ -974,6 +1049,11 @@ async def save_start_message(message: Message, state: FSMContext):
         await state.clear()
         return
 
+    if message.media_group_id and message.photo:
+        await _collect_start_media_group(message, state)
+        return
+
+    payload = {"type": "text", "text": ""}
     payload = {"type": "text", "text": ""}
 
     if message.location:
@@ -1009,9 +1089,55 @@ async def save_start_message(message: Message, state: FSMContext):
     elif message.text:
         payload = {"type": "text", "text": message.text}
 
-    await set_setting("start_message", json.dumps(payload, ensure_ascii=False))
+    raw = await get_setting("start_messages")
+    messages = []
+    if raw:
+        try:
+            messages = json.loads(raw)
+        except Exception:
+            messages = []
+
+    messages.append(payload)
+    await set_setting("start_messages", json.dumps(messages, ensure_ascii=False))
     await state.clear()
-    await message.answer("✅ Start xabar saqlandi.")
+    await message.answer("✅ Start xabar qo'shildi.")
+
+
+@router.message(StartMessageDeleteState.waiting)
+async def delete_start_message(message: Message, state: FSMContext):
+    if not await is_admin(str(message.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+        await state.clear()
+        return
+
+    raw = await get_setting("start_messages")
+    if not raw:
+        await state.clear()
+        await message.answer("Start xabarlar topilmadi.")
+        return
+
+    try:
+        messages = json.loads(raw)
+    except Exception:
+        messages = []
+
+    try:
+        idx = int(message.text.strip()) - 1
+    except Exception:
+        await message.answer("Raqam yuboring. Masalan: 1")
+        return
+
+    if idx < 0 or idx >= len(messages):
+        await message.answer("Bunday raqam yo'q.")
+        return
+
+    messages.pop(idx)
+    if messages:
+        await set_setting("start_messages", json.dumps(messages, ensure_ascii=False))
+    else:
+        await delete_setting("start_messages")
+
+    await state.clear()
+    await message.answer("✅ Start xabar o'chirildi.")
 
     if not rooms:
         await message.answer("❌ Bu sanalarda bo'sh xona topilmadi.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -1034,3 +1160,67 @@ def _validate_date(date_str: str) -> bool:
         return True
     except Exception:
         return False
+
+
+async def _collect_start_media_group(message: Message, state: FSMContext) -> None:
+    key = (message.from_user.id, message.media_group_id)
+    group = START_MEDIA_GROUPS.setdefault(key, {"items": [], "caption": "", "task": None})
+    group["items"].append(message.photo[-1].file_id)
+    if message.caption and not group["caption"]:
+        group["caption"] = message.caption
+
+    if group["task"]:
+        return
+
+    async def finalize():
+        await asyncio.sleep(1.0)
+        data = START_MEDIA_GROUPS.pop(key, None)
+        if not data:
+            return
+        payload = {
+            "type": "media_group",
+            "files": data["items"],
+            "caption": data.get("caption", "")
+        }
+        raw = await get_setting("start_messages")
+        messages = []
+        if raw:
+            try:
+                messages = json.loads(raw)
+            except Exception:
+                messages = []
+        messages.append(payload)
+        await set_setting("start_messages", json.dumps(messages, ensure_ascii=False))
+        await state.clear()
+        await message.answer("вњ… Start xabar qo'shildi.")
+
+    group["task"] = asyncio.create_task(finalize())
+
+
+async def _collect_post_media_group(message: Message, state: FSMContext) -> None:
+    key = (message.from_user.id, message.media_group_id)
+    group = POST_MEDIA_GROUPS.setdefault(key, {"items": [], "caption": "", "task": None})
+    group["items"].append(message.photo[-1].file_id)
+    if message.caption and not group["caption"]:
+        group["caption"] = message.caption
+
+    if group["task"]:
+        return
+
+    async def finalize():
+        await asyncio.sleep(1.0)
+        data = POST_MEDIA_GROUPS.pop(key, None)
+        if not data:
+            return
+        await state.update_data(
+            post_media=data["items"],
+            post_caption=data.get("caption", ""),
+            step="post_preview"
+        )
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="вњ… Yuborish", callback_data="send_post")],
+            [InlineKeyboardButton(text="вќЊ Bekor", callback_data="admin_back")]
+        ])
+        await message.answer("рџ“ќ <b>Post:</b>\n\nRasmlar qabul qilindi.", reply_markup=keyboard)
+
+    group["task"] = asyncio.create_task(finalize())
