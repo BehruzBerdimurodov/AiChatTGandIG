@@ -464,6 +464,11 @@ async def set_post_channel(channel_id: str):
         await db.execute("INSERT INTO post_channel (channel_id) VALUES (?)", (channel_id,))
 
 
+async def clear_post_channel():
+    async with get_db() as db:
+        await db.execute("DELETE FROM post_channel")
+
+
 async def log_message(user_id: str, direction: str, message: str, response: str = ''):
     async with get_db() as db:
         await db.execute("""

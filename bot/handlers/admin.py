@@ -18,7 +18,7 @@ from config.database import is_admin
 from config.database import (
     is_admin, get_rooms, get_room, add_room, update_room, delete_room,
     get_hotel, update_hotel, get_channels, add_channel as db_add_channel, remove_channel,
-    get_post_channel, set_post_channel, add_admin as db_add_admin, remove_admin as db_remove_admin, get_admins,
+    get_post_channel, set_post_channel, clear_post_channel, add_admin as db_add_admin, remove_admin as db_remove_admin, get_admins,
     get_user_count, get_orders, get_order, update_order, get_all_users,
     get_daily_stats, get_monthly_stats, log_activity, find_available_rooms, set_setting, get_setting, delete_setting
 )
@@ -704,17 +704,34 @@ async def channels_manage(callback: CallbackQuery):
     channels = await get_channels()
     post_ch = await get_post_channel()
     
-    text = f"📢 <b>Kanallar:</b>\n\n"
-    for ch in channels:
-        text += f"• {ch.get('title', ch.get('channel_id', ''))}\n"
+    text = "📢 <b>Kanallar:</b>\n\n"
+    if channels:
+        for idx, ch in enumerate(channels, start=1):
+            title = ch.get("title") or ch.get("channel_id", "")
+            text += f"{idx}. {title} (ID: {ch.get('channel_id', '')})\n"
+    else:
+        text += "Hozircha kanal yo'q.\n"
     text += f"\nPost kanali: {post_ch or 'Belgilanmagan'}"
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="➕ Kanal qo'shish", callback_data="add_channel")],
+        [InlineKeyboardButton(text="🗑 O'chirish", callback_data="remove_channel")],
         [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")]
     ])
-    
     await callback.message.edit_text(text, reply_markup=keyboard)
+
+
+@router.callback_query(F.data == "remove_channel")
+async def remove_channel_start(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+        return
+
+    await state.set_state(ChannelState.waiting)
+    await state.update_data(step="remove_channel")
+    await callback.message.edit_text(
+        "O'chirish uchun kanal raqami yoki channel ID yuboring.\n"
+        "Post kanalini o'chirish uchun: post:off"
+    )
 
 
 @router.callback_query(F.data == "add_channel")
@@ -732,14 +749,16 @@ async def add_channel(callback: CallbackQuery, state: FSMContext):
 
 
 @router.message(ChannelState.waiting)
+@router.message(ChannelState.waiting)
 async def save_channel(message: Message, state: FSMContext, bot: Bot):
     if not await is_admin(str(message.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         await state.clear()
         return
     
     data = await state.get_data()
+    step = data.get("step")
     
-    if data.get("step") == "add_channel":
+    if step == "add_channel":
         text = message.text.strip()
         is_post = text.startswith("post:")
         if is_post:
@@ -760,8 +779,36 @@ async def save_channel(message: Message, state: FSMContext, bot: Bot):
             await state.clear()
         return
     
-    await state.clear()
+    if step == "remove_channel":
+        text = (message.text or "").strip()
+        if text.lower() in ["post:off", "post:clear", "post:delete"]:
+            await clear_post_channel()
+            await state.clear()
+            await message.answer("✅ Post kanali o'chirildi.")
+            return
 
+        channels = await get_channels()
+        target_id = None
+        if text.isdigit():
+            idx = int(text) - 1
+            if 0 <= idx < len(channels):
+                target_id = channels[idx].get("channel_id")
+        if not target_id:
+            try:
+                target_id = str(int(text))
+            except Exception:
+                target_id = None
+
+        if not target_id:
+            await message.answer("Raqam yoki channel ID yuboring.")
+            return
+
+        await remove_channel(target_id)
+        await state.clear()
+        await message.answer("✅ Kanal o'chirildi.")
+        return
+    
+    await state.clear()
 
 @router.callback_query(F.data == "post_create")
 async def post_create(callback: CallbackQuery):
