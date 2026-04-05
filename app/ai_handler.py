@@ -271,6 +271,21 @@ async def get_ai_response(
 
     booking_info = extract_booking_info(user_message)
     text_lower = user_message.lower().strip()
+
+    # Start-over intent: user wants to begin a new booking
+    if any(
+        phrase in text_lower
+        for phrase in [
+            "xona kerak",
+            "xona band",
+            "xona band qilish",
+            "xona bron",
+            "bron qilish",
+            "band qilish",
+        ]
+    ):
+        BOOKING_DRAFT.pop(user_id, None)
+        BOOKING_STORE.pop(user_id, None)
     
     print(f"[AI] User: {user_id}, Platform: {platform}")
     print(f"[AI] Message: {user_message}")
@@ -282,11 +297,18 @@ async def get_ai_response(
     if not booking_info and any(
         phrase in text_lower
         for phrase in [
+            "qancha bor",
+            "qanqa bor",
+            "qanaqa bor",
+            "qanaqa xonalar",
             "qanday xonalar bor",
             "qanday xonalar",
             "xonalar bor",
             "xonalar bormi",
             "xonalar",
+            "xona narx",
+            "narxlari",
+            "narxlar",
         ]
     ):
         rooms = await get_rooms(only_active=True)
@@ -428,6 +450,8 @@ async def get_ai_response(
 
         if int(draft["guests"]) > int(room.get("capacity", 1)):
             capacity = room.get("capacity", 1)
+            draft["guests"] = None
+            BOOKING_DRAFT[user_id] = draft
             reply = (
                 f"{room['name']} sigimi {capacity} kishigacha. "
                 "Katta xona tanlaysizmi yoki mehmonlar sonini kamaytirasizmi?"
