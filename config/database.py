@@ -5,7 +5,7 @@ Asinxron aiosqlite orqali xavfsiz va yuqori bosimga chidamli Ma'lumotlar Bazasi
 import aiosqlite
 import os
 from datetime import datetime
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 from contextlib import asynccontextmanager
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "../data/hotel.db")
@@ -31,7 +31,7 @@ async def init_db():
             CREATE TABLE IF NOT EXISTS hotel (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT DEFAULT "Marco Polo Hotel",
-                address TEXT DEFAULT "Dombirobod Naqqoshlik 122A",
+                address TEXT DEFAULT "Dombirobod Naqqoshlik 121A",
                 phone TEXT DEFAULT "+998773397171",
                 phone_2 TEXT DEFAULT "+998771577171",
                 telegram TEXT DEFAULT "@Marcopolohotel_1",
@@ -520,3 +520,21 @@ async def get_monthly_stats() -> Dict:
             'total_orders': total_orders,
             'revenue': revenue
         }
+
+
+async def get_setting(key: str) -> Optional[str]:
+    async with get_db() as db:
+        async with db.execute("SELECT value FROM settings WHERE key = ?", (key,)) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else None
+
+
+async def set_setting(key: str, value: str):
+    async with get_db() as db:
+        await db.execute("""
+            INSERT INTO settings (key, value)
+            VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET
+                value = excluded.value,
+                updated_at = CURRENT_TIMESTAMP
+        """, (key, value))

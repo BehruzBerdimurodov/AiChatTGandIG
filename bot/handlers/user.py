@@ -4,18 +4,21 @@ AI chat + Bron qilish + Barcha funksiyalar
 """
 
 import logging
+import json
 import os
 from datetime import datetime
 from aiogram import Router, F, Bot
 from aiogram.filters import CommandStart, Command
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from aiogram.enums import ChatAction
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 
 from app.ai_handler import get_ai_response, clear_history, get_booking_data, clear_booking_data
 from bot.handlers.admin import ADMIN_IN_ADMIN_MODE
 from app.subscription import check_subscription, subscription_keyboard
 from config.database import (
-    get_hotel, get_rooms, get_room, register_user, is_admin, log_activity
+    get_hotel, get_rooms, get_room, register_user, is_admin, log_activity, get_user, get_setting
 )
 from bot.keyboards.keyboards import main_kb, rooms_inline_kb, back_main_inline_kb
 
@@ -56,48 +59,160 @@ def format_price(price: int) -> str:
     return f"{price:,}".replace(",", " ")
 
 
+async def send_start_message(bot: Bot, chat_id: int):
+    raw = await get_setting("start_message")
+    if not raw:
+        return False
+    try:
+        payload = json.loads(raw)
+    except Exception:
+        return False
+
+    msg_type = payload.get("type")
+    if msg_type == "text":
+        await bot.send_message(chat_id, payload.get("text", ""), reply_markup=main_kb(chat_id))
+    elif msg_type == "photo":
+        await bot.send_photo(chat_id, payload.get("file_id"), caption=payload.get("caption", ""), reply_markup=main_kb(chat_id))
+    elif msg_type == "video":
+        await bot.send_video(chat_id, payload.get("file_id"), caption=payload.get("caption", ""), reply_markup=main_kb(chat_id))
+    elif msg_type == "voice":
+        await bot.send_voice(chat_id, payload.get("file_id"), caption=payload.get("caption", ""), reply_markup=main_kb(chat_id))
+    elif msg_type == "document":
+        await bot.send_document(chat_id, payload.get("file_id"), caption=payload.get("caption", ""), reply_markup=main_kb(chat_id))
+    elif msg_type == "location":
+        await bot.send_location(chat_id, payload.get("lat"), payload.get("lng"), reply_markup=main_kb(chat_id))
+    else:
+        return False
+    return True
+
+
+class OnboardState(StatesGroup):
+    name = State()
+    contact = State()
+
+
 @router.message(CommandStart())
-async def cmd_start(message: Message, bot: Bot):
+async def cmd_start(message: Message, bot: Bot, state: FSMContext):
     user = message.from_user
     user_id = str(user.id)
-    
+
     if user_id in ADMIN_IN_ADMIN_MODE:
-        await message.answer(
-            "⚠️ Siz hali admin rejimedasiz!\n\n"
-            "Admin panelidan chiqish uchun '🚪 Chiqish' tugmasini bosing\n"
-            "yoki /admin buyrug'ini qayta yuboring.",
-            reply_markup=main_kb(user.id)
-        )
-        return
-    
-    await register_user(
-        user_id=user_id,
-        user_type='telegram',
-        first_name=user.first_name or "Mehmon",
-        last_name=user.last_name or "",
-        username=user.username or ""
-    )
-    await log_activity(user_id, "start", f"/start")
+        # Reset admin mode on /start to avoid getting stuck
+        ADMIN_IN_ADMIN_MODE.discard(user_id)
 
     ok, missing = await check_subscription(bot, user.id)
     if not ok:
         await message.answer(
-            "⚠️ <b>Botdan foydalanish uchun quyidagi kanallarga obuna bo'ling:</b>",
+            """Botdan foydalanish uchun quyidagi kanallarga obuna bo'ling:""",
             reply_markup=subscription_keyboard(missing),
         )
         return
 
+    existing = await get_user(user_id)
+    has_phone = bool(existing and existing.get("phone"))
+    has_name = bool(existing and (existing.get("first_name") or existing.get("last_name")))
+
+    if not has_phone or not has_name:
+        await state.set_state(OnboardState.name)
+        await message.answer(
+            """Assalomu alaykum! Iltimos, ism va familiyangizni yozing.
+Masalan: Behruz Berdimurodov""",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return
+
+    await register_user(
+        user_id=user_id,
+        user_type='telegram',
+        first_name=user.first_name or existing.get("first_name") or "Mehmon",
+        last_name=user.last_name or existing.get("last_name") or "",
+        username=user.username or existing.get("username") or ""
+    )
+    await log_activity(user_id, "start", f"/start")
+
+    if await send_start_message(bot, message.chat.id):
+        return
+
     hotel = await get_hotel()
-    name = user.first_name or "Mehmon"
-    
+    name = existing.get("first_name") or user.first_name or "Mehmon"
+
     await message.answer(
-        f"👋 <b>Assalomu alaykum, {name}!</b>\n\n"
-        f"<b>Marco Polo Hotel 🏩</b> ga xush kelibsiz!\n\n"
-        f"📍 Do'mbirobod Naqqoshlik 122A\n"
-        f"📞 {hotel.get('phone', '+998773397171')}\n\n"
-        f"Men sizga yordam berishga tayyorman!\n"
-        f"Savol yoki so'rov yozing! 😊",
+        f"""Assalomu alaykum, {name}!
+
+Marco Polo Hotel ga xush kelibsiz!
+
+Manzil: Do'mbirobod Naqqoshlik 121A
+Telefon: {hotel.get('phone', '+998773397171')}
+
+Men sizga yordam berishga tayyorman.
+Savol yoki so'rov yozing!""",
         reply_markup=main_kb(user.id)
+    )
+
+
+@router.message(OnboardState.name)
+async def onboard_name(message: Message, state: FSMContext):
+    full_name = (message.text or "").strip()
+    if not full_name:
+        await message.answer("Ism va familiyangizni yozing.")
+        return
+
+    parts = full_name.split()
+    first_name = parts[0]
+    last_name = " ".join(parts[1:]) if len(parts) > 1 else ""
+
+    await state.update_data(first_name=first_name, last_name=last_name)
+    await state.set_state(OnboardState.contact)
+
+    kb = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Kontakt yuborish", request_contact=True)]],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+    await message.answer("Telefon raqamingizni yuboring:", reply_markup=kb)
+
+
+@router.message(OnboardState.contact)
+async def onboard_contact(message: Message, state: FSMContext):
+    if not message.contact or not message.contact.phone_number:
+        await message.answer("Iltimos, pastdagi tugma orqali kontakt yuboring.")
+        return
+
+    data = await state.get_data()
+    first_name = data.get("first_name") or (message.from_user.first_name or "Mehmon")
+    last_name = data.get("last_name") or (message.from_user.last_name or "")
+
+    phone = message.contact.phone_number.strip()
+    if not phone.startswith("+"):
+        phone = "+" + phone
+
+    await register_user(
+        user_id=str(message.from_user.id),
+        user_type="telegram",
+        first_name=first_name,
+        last_name=last_name,
+        username=message.from_user.username or "",
+        phone=phone
+    )
+    await log_activity(str(message.from_user.id), "onboard", "name_and_phone")
+
+    await state.clear()
+    hotel = await get_hotel()
+
+    address = hotel.get("address", "Do'mbirobod Naqqoshlik 121A")
+    phone_main = hotel.get("phone", "+998773397171")
+
+    if await send_start_message(message.bot, message.chat.id):
+        return
+
+    await message.answer(
+        f"""Rahmat! Ma'lumotlar saqlandi.
+
+Manzil: {address}
+Telefon: {phone_main}
+
+Savol yoki so'rov yozing!""",
+        reply_markup=main_kb(message.from_user.id)
     )
 
 

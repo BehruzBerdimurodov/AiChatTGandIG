@@ -7,7 +7,7 @@ import os
 import re
 from datetime import datetime
 from openai import AsyncOpenAI
-from config.database import get_hotel, get_rooms, get_room, create_order, log_message, log_activity, register_user, get_admins, find_available_rooms
+from config.database import get_hotel, get_rooms, get_room, create_order, log_message, log_activity, register_user, get_admins, find_available_rooms, get_user
 
 client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
@@ -33,7 +33,7 @@ async def _build_system_prompt(user_platform: str = "telegram") -> str:
     
     hotel_phone = hotel.get('phone', '+998773397171')
     hotel_phone2 = hotel.get('phone_2', '+998771577171')
-    hotel_address = hotel.get('address', "Do'mbirobod Naqqoshlik 122A")
+    hotel_address = hotel.get('address', "Do'mbirobod Naqqoshlik 121A")
 
     platform_intro = "SIZ: Marco Polo Hotel 🏩 - Professional Telegram AI yordamchisi"
     if user_platform == "instagram":
@@ -195,7 +195,7 @@ def extract_booking_info(text: str) -> dict | None:
             break
 
     # "6 maqul", "6 xona", "xona 6", "6-tanladim" kabi holatlar
-    room_index_match = re.search(r'\b([1-9])\s*(?:-?\s*xona|xona|maqul|tanladim|tanlayman)\b', text_lower)
+    room_index_match = re.search(r'\b([1-9])\s*(?:-?\s*xona|xona|maqul|tanladim|tanlayman)?\b', text_lower)
     if room_index_match:
         try:
             room_choice_index = int(room_index_match.group(1))
@@ -341,6 +341,21 @@ async def get_ai_response(
         BOOKING_DRAFT[user_id] = draft
 
     if draft:
+        # Prefill name/phone from DB for Telegram users to avoid extra prompts
+        if user_id.startswith("tg_"):
+            db_user = await get_user(user_id.replace("tg_", ""))
+            if db_user:
+                if not draft.get("name"):
+                    first = db_user.get("first_name") or ""
+                    last = db_user.get("last_name") or ""
+                    full = (first + " " + last).strip()
+                    if full:
+                        draft["name"] = full
+                        BOOKING_DRAFT[user_id] = draft
+                if not draft.get("phone") and db_user.get("phone"):
+                    draft["phone"] = db_user.get("phone")
+                    BOOKING_DRAFT[user_id] = draft
+
         # If user sent a name only, accept it as name to avoid loops
         if not draft.get('name'):
             name_only = re.fullmatch(r'[A-Za-z]+(?:\s+[A-Za-z]+)?', user_message.strip())
@@ -425,6 +440,12 @@ async def get_ai_response(
                 ),
                 None
             )
+        if not room:
+            # Try to match by room name text in the last user message
+            for r in rooms_all:
+                if r["name"].lower() in text_lower:
+                    room = r
+                    break
 
         if not room:
             reply = "Xona topilmadi. Iltimos, xona nomini yoki royxatdagi raqamni yozing."
@@ -624,7 +645,7 @@ async def send_order_to_admins(bot, order_data: dict, admin_ids: list):
     hotel = await get_hotel()
     price_fmt = f"{order_data['total_price']:,}".replace(",", " ")
     
-    hotel_address = hotel.get('address', "Do'mbirobod Naqqoshlik 122A")
+    hotel_address = hotel.get('address', "Do'mbirobod Naqqoshlik 121A")
     message = f"""
 🔔 <b>YANGI BRON!</b>
 

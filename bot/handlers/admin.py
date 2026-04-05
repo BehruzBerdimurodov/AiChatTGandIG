@@ -3,6 +3,8 @@ Admin Panel Handler - /admin orqali kirish
 """
 
 import logging
+import json
+import json
 import os
 from datetime import datetime
 from aiogram import Router, F, Bot
@@ -18,7 +20,7 @@ from config.database import (
     get_hotel, update_hotel, get_channels, add_channel as db_add_channel, remove_channel,
     get_post_channel, set_post_channel, add_admin as db_add_admin, remove_admin as db_remove_admin, get_admins,
     get_user_count, get_orders, get_order, update_order, get_all_users,
-    get_daily_stats, get_monthly_stats, log_activity, find_available_rooms
+    get_daily_stats, get_monthly_stats, log_activity, find_available_rooms, set_setting
 )
 from bot.keyboards.keyboards import admin_main_kb
 
@@ -62,6 +64,10 @@ class AvailabilityState(StatesGroup):
     waiting = State()
 
 
+class StartMessageState(StatesGroup):
+    waiting = State()
+
+
 ADMIN_IN_ADMIN_MODE = set()
 
 
@@ -81,6 +87,7 @@ async def admin_panel(message: Message, state: FSMContext):
         [InlineKeyboardButton(text="📢 Kanallar", callback_data="channels_manage"),
          InlineKeyboardButton(text="📝 Post", callback_data="post_create")],
         [InlineKeyboardButton(text="🟢 Bo'sh xonalar", callback_data="available_rooms")],
+        [InlineKeyboardButton(text="✉️ Start xabar", callback_data="start_message")],
         [InlineKeyboardButton(text="👥 Adminlar", callback_data="admins_list")],
         [InlineKeyboardButton(text="🚪 Chiqish", callback_data="admin_logout")],
     ])
@@ -407,6 +414,7 @@ async def admin_back(callback: CallbackQuery):
         [InlineKeyboardButton(text="📢 Kanallar", callback_data="channels_manage"),
          InlineKeyboardButton(text="📝 Post", callback_data="post_create")],
         [InlineKeyboardButton(text="🟢 Bo'sh xonalar", callback_data="available_rooms")],
+        [InlineKeyboardButton(text="✉️ Start xabar", callback_data="start_message")],
         [InlineKeyboardButton(text="👥 Adminlar", callback_data="admins_list")],
         [InlineKeyboardButton(text="🚪 Chiqish", callback_data="admin_logout")],
     ])
@@ -945,6 +953,65 @@ async def available_rooms_show(message: Message, state: FSMContext):
 
     rooms = await find_available_rooms(check_in, check_out, only_active=True)
     await state.clear()
+
+
+@router.callback_query(F.data == "start_message")
+async def start_message(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+        return
+
+    await state.set_state(StartMessageState.waiting)
+    await callback.message.edit_text(
+        "Start xabarni yuboring.\n"
+        "Matn, rasm+matn, voice, video, dokument yoki location bo'lishi mumkin.\n"
+        "Shu xabar /start bosilganda yuboriladi."
+    )
+
+
+@router.message(StartMessageState.waiting)
+async def save_start_message(message: Message, state: FSMContext):
+    if not await is_admin(str(message.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+        await state.clear()
+        return
+
+    payload = {"type": "text", "text": ""}
+
+    if message.location:
+        payload = {
+            "type": "location",
+            "lat": message.location.latitude,
+            "lng": message.location.longitude,
+        }
+    elif message.photo:
+        payload = {
+            "type": "photo",
+            "file_id": message.photo[-1].file_id,
+            "caption": message.caption or "",
+        }
+    elif message.video:
+        payload = {
+            "type": "video",
+            "file_id": message.video.file_id,
+            "caption": message.caption or "",
+        }
+    elif message.voice:
+        payload = {
+            "type": "voice",
+            "file_id": message.voice.file_id,
+            "caption": message.caption or "",
+        }
+    elif message.document:
+        payload = {
+            "type": "document",
+            "file_id": message.document.file_id,
+            "caption": message.caption or "",
+        }
+    elif message.text:
+        payload = {"type": "text", "text": message.text}
+
+    await set_setting("start_message", json.dumps(payload, ensure_ascii=False))
+    await state.clear()
+    await message.answer("✅ Start xabar saqlandi.")
 
     if not rooms:
         await message.answer("❌ Bu sanalarda bo'sh xona topilmadi.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
