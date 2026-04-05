@@ -28,7 +28,9 @@ async def _build_system_prompt(user_platform: str = "telegram") -> str:
     room_lines = []
     for r in rooms:
         price = f"{r['price']:,}".replace(",", " ")
-        room_lines.append(f"- {r['name']}: {price} so'm/kun | {r['description']} | {r['capacity']} kishi")
+        room_lines.append(
+            f"- {r['name']}: {price} so'm/kun | {r['description']} | {r['capacity']} kishi | {r.get('quantity', 1)} ta"
+        )
     rooms_text = "\n".join(room_lines) if room_lines else "Xonalar mavjud emas"
     
     hotel_phone = hotel.get('phone', '+998773397171')
@@ -317,7 +319,7 @@ async def get_ai_response(
             for idx, room in enumerate(rooms, start=1):
                 price = f"{room['price']:,}".replace(",", " ")
                 lines.append(
-                    f"{idx}. {room['name']}: {price} so'm/kun | {room.get('description', '')} | {room.get('capacity', 1)} kishi"
+                    f"{idx}. {room['name']}: {price} so'm/kun | {room.get('description', '')} | {room.get('capacity', 1)} kishi | {room.get('quantity', 1)} ta"
                 )
             lines.append("Qaysi xonani tanlaysiz? (nom yoki raqam)")
             reply = "\n".join(lines)
@@ -375,8 +377,9 @@ async def get_ai_response(
                         lines = ["Mavjud xonalar:"]
                         for idx, room in enumerate(available_rooms, start=1):
                             price = f"{room.get('price', 0):,}".replace(",", " ")
+                            available_count = room.get("available_count", 0)
                             lines.append(
-                                f"{idx}. {room.get('name')} - {price} so'm/kun | {room.get('capacity', 1)} kishi"
+                                f"{idx}. {room.get('name')} - {price} so'm/kun | {room.get('capacity', 1)} kishi | {available_count} ta"
                             )
                         lines.append("Qaysi xonani tanlaysiz? (nom yoki raqam)")
                         reply = "\n".join(lines)
@@ -550,7 +553,10 @@ async def get_ai_response(
         )
         if room["id"] not in {r["id"] for r in available_rooms}:
             if available_rooms:
-                room_names = ", ".join(r["name"] for r in available_rooms)
+                room_names = ", ".join(
+                    f"{r['name']} ({r.get('available_count', 0)} ta)"
+                    for r in available_rooms
+                )
                 reply = (
                     "Tanlangan xona bu sanalarda band. "
                     f"Mavjud xonalar: {room_names}. "

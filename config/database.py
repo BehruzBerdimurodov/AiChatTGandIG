@@ -51,9 +51,21 @@ async def init_db():
                 capacity INTEGER DEFAULT 2,
                 amenities TEXT DEFAULT '',
                 active INTEGER DEFAULT 1,
+                quantity INTEGER DEFAULT 1,
+                room_numbers TEXT DEFAULT '',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+
+        # Migration for existing DBs
+        try:
+            await db.execute("ALTER TABLE rooms ADD COLUMN quantity INTEGER DEFAULT 1")
+        except Exception:
+            pass
+        try:
+            await db.execute("ALTER TABLE rooms ADD COLUMN room_numbers TEXT DEFAULT ''")
+        except Exception:
+            pass
         
         await db.execute("""
             CREATE TABLE IF NOT EXISTS users (
@@ -175,14 +187,14 @@ async def init_db():
             count = await cursor.fetchone()
             if count[0] == 0:
                 default_rooms = [
-                    ('standart', 'Standart Room', 200000, '1 yotoq, SMART TV, Wi-Fi, Konditsioner, Toza vannaxona', 2, '📺 SMART TV|🌐 Wi-Fi|❄️ Konditsioner|🚿 Toza vannaxona', 1),
-                    ('deluxe', 'Deluxe Room', 250000, 'Katta xona, 1 katta yotoq, SMART TV, Wi-Fi, Konditsioner', 2, '📺 SMART TV|🌐 Wi-Fi|❄️ Konditsioner|🛏️ Katta yotoq|🚿 Vannaxona', 1),
-                    ('suite', 'Suite', 300000, 'Keng xona, katta yotoq, SMART TV, Wi-Fi, Konditsioner, Minibar', 2, '📺 SMART TV|🌐 Wi-Fi|❄️ Konditsioner|🛏️ Katta yotoq|🍷 Minibar|🚿 Jakuzzi', 1),
-                    ('vip', 'VIP Room', 350000, 'Premium xona, katta yotoq, SPA kirish, Lounge bar, Jakuzzi', 2, '📺 SMART TV|🌐 Wi-Fi|❄️ Konditsioner|🛏️ Katta yotoq|💆 SPA|🍷 Lounge bar|🛁 Jakuzzi', 1),
-                    ('family', 'Family Room', 400000, 'Oilaviy xona, 2 yotoq, SMART TV, Wi-Fi, SPA, Oshxona', 4, '📺 SMART TV|🌐 Wi-Fi|❄️ Konditsioner|🛏️ 2 yotoq|💆 SPA|🍳 Oshxona', 1),
-                    ('premium', 'Premium Room', 450000, 'Eng yaxshi xona, katta yotoq, SPA, Lounge bar, barcha qulayliklar', 2, '📺 SMART TV|🌐 Wi-Fi|❄️ Konditsioner|🛏️ Katta yotoq|💆 SPA|🍷 Lounge bar|🛁 Jakuzzi|🍷 Minibar', 1),
+                    ('standart', 'Standart Room', 200000, '1 yotoq, SMART TV, Wi-Fi, Konditsioner, Toza vannaxona', 2, '📺 SMART TV|🌐 Wi-Fi|❄️ Konditsioner|🚿 Toza vannaxona', 1, 1, ''),
+                    ('deluxe', 'Deluxe Room', 250000, 'Katta xona, 1 katta yotoq, SMART TV, Wi-Fi, Konditsioner', 2, '📺 SMART TV|🌐 Wi-Fi|❄️ Konditsioner|🛏️ Katta yotoq|🚿 Vannaxona', 1, 1, ''),
+                    ('suite', 'Suite', 300000, 'Keng xona, katta yotoq, SMART TV, Wi-Fi, Konditsioner, Minibar', 2, '📺 SMART TV|🌐 Wi-Fi|❄️ Konditsioner|🛏️ Katta yotoq|🍷 Minibar|🚿 Jakuzzi', 1, 1, ''),
+                    ('vip', 'VIP Room', 350000, 'Premium xona, katta yotoq, SPA kirish, Lounge bar, Jakuzzi', 2, '📺 SMART TV|🌐 Wi-Fi|❄️ Konditsioner|🛏️ Katta yotoq|💆 SPA|🍷 Lounge bar|🛁 Jakuzzi', 1, 1, ''),
+                    ('family', 'Family Room', 400000, 'Oilaviy xona, 2 yotoq, SMART TV, Wi-Fi, SPA, Oshxona', 4, '📺 SMART TV|🌐 Wi-Fi|❄️ Konditsioner|🛏️ 2 yotoq|💆 SPA|🍳 Oshxona', 1, 1, ''),
+                    ('premium', 'Premium Room', 450000, 'Eng yaxshi xona, katta yotoq, SPA, Lounge bar, barcha qulayliklar', 2, '📺 SMART TV|🌐 Wi-Fi|❄️ Konditsioner|🛏️ Katta yotoq|💆 SPA|🍷 Lounge bar|🛁 Jakuzzi|🍷 Minibar', 1, 1, ''),
                 ]
-                await db.executemany("INSERT INTO rooms (id, name, price, description, capacity, amenities, active) VALUES (?, ?, ?, ?, ?, ?, ?)", default_rooms)
+                await db.executemany("INSERT INTO rooms (id, name, price, description, capacity, amenities, active, quantity, room_numbers) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", default_rooms)
 
 
 async def get_hotel() -> Dict:
@@ -219,10 +231,11 @@ async def get_room(room_id: str) -> Optional[Dict]:
 async def add_room(room_id: str, data: Dict):
     async with get_db() as db:
         await db.execute("""
-            INSERT OR REPLACE INTO rooms (id, name, price, description, capacity, amenities, active)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO rooms (id, name, price, description, capacity, amenities, active, quantity, room_numbers)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (room_id, data.get('name'), data.get('price'), data.get('description'),
-              data.get('capacity', 2), data.get('amenities', ''), data.get('active', 1)))
+              data.get('capacity', 2), data.get('amenities', ''), data.get('active', 1),
+              data.get('quantity', 1), data.get('room_numbers', '')))
 
 
 async def update_room(room_id: str, field: str, value):
@@ -366,24 +379,46 @@ async def is_room_available(room_id: str, check_in: str, check_out: str) -> bool
         return False
 
     async with get_db() as db:
+        async with db.execute("SELECT quantity FROM rooms WHERE id = ?", (room_id,)) as cursor:
+            row = await cursor.fetchone()
+            quantity = int(row["quantity"]) if row and row["quantity"] is not None else 1
+
         async with db.execute(
-            "SELECT check_in, check_out, status FROM orders WHERE room_id = ? AND status != 'cancelled'",
-            (room_id,)
+            """
+            SELECT COUNT(*) AS cnt
+            FROM orders
+            WHERE room_id = ?
+              AND status != 'cancelled'
+              AND check_in < ?
+              AND check_out > ?
+            """,
+            (room_id, check_out, check_in)
         ) as cursor:
-            rows = await cursor.fetchall()
+            cnt_row = await cursor.fetchone()
+            taken = int(cnt_row["cnt"]) if cnt_row else 0
 
-    for row in rows:
-        try:
-            existing_start = datetime.strptime(row["check_in"], "%Y-%m-%d").date()
-            existing_end = datetime.strptime(row["check_out"], "%Y-%m-%d").date()
-        except Exception:
-            continue
+    return taken < max(quantity, 1)
 
-        # Overlap if start < existing_end and end > existing_start
-        if start < existing_end and end > existing_start:
-            return False
 
-    return True
+async def get_available_count(room_id: str, check_in: str, check_out: str) -> int:
+    async with get_db() as db:
+        async with db.execute("SELECT quantity FROM rooms WHERE id = ?", (room_id,)) as cursor:
+            row = await cursor.fetchone()
+            quantity = int(row["quantity"]) if row and row["quantity"] is not None else 1
+        async with db.execute(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM orders
+            WHERE room_id = ?
+              AND status != 'cancelled'
+              AND check_in < ?
+              AND check_out > ?
+            """,
+            (room_id, check_out, check_in)
+        ) as cursor:
+            cnt_row = await cursor.fetchone()
+            taken = int(cnt_row["cnt"]) if cnt_row else 0
+    return max(quantity - taken, 0)
 
 
 async def find_available_rooms(check_in: str, check_out: str, only_active: bool = True) -> List[Dict]:
@@ -391,6 +426,8 @@ async def find_available_rooms(check_in: str, check_out: str, only_active: bool 
     available = []
     for room in rooms:
         if await is_room_available(room["id"], check_in, check_out):
+            remaining = await get_available_count(room["id"], check_in, check_out)
+            room["available_count"] = remaining
             available.append(room)
     return available
     async with get_db() as db:

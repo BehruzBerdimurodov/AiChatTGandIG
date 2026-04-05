@@ -6,7 +6,7 @@ import logging
 import json
 import os
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from aiogram import Router, F, Bot
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -469,17 +469,20 @@ async def room_detail_admin(callback: CallbackQuery):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✏️ Narx", callback_data=f"edit_room_price_{room_id}"),
          InlineKeyboardButton(text="📝 Tavsif", callback_data=f"edit_room_desc_{room_id}")],
+        [InlineKeyboardButton(text="🧮 Xona soni", callback_data=f"edit_room_qty_{room_id}"),
+         InlineKeyboardButton(text="🔢 Raqamlar", callback_data=f"edit_room_numbers_{room_id}")],
         [InlineKeyboardButton(text="❌ O'chirish" if room.get("active") else "✅ Yoqish", 
                              callback_data=f"toggle_room_{room_id}")],
         [InlineKeyboardButton(text="🗑 Xonani o'chirish", callback_data=f"delete_room_{room_id}")],
         [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_rooms_list")],
     ])
-    
     await callback.message.edit_text(
         f"🏠 <b>{room.get('name')}</b>\n\n"
         f"💰 Narx: {format_price(room.get('price', 0))} so'm/kun\n"
         f"📋 Tavsif: {room.get('description', '')}\n"
         f"👥 Sig'im: {room.get('capacity', 0)} kishi\n"
+        f"🧮 Soni: {room.get('quantity', 1)} ta\n"
+        f"🔢 Raqamlar: {room.get('room_numbers', '')}\n"
         f"📌 Holat: {status}",
         reply_markup=keyboard
     )
@@ -573,6 +576,29 @@ async def edit_room_desc(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text("📝 Yangi tavsifni yuboring:")
 
 
+
+@router.callback_query(F.data.startswith("edit_room_qty_"))
+async def edit_room_qty(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+        return
+    
+    room_id = callback.data.replace("edit_room_qty_", "")
+    await state.set_state(RoomEditState.waiting)
+    await state.update_data(room_id=room_id, field="quantity")
+    
+    await callback.message.edit_text("🧮 Xona sonini yuboring (raqam):")
+
+
+@router.callback_query(F.data.startswith("edit_room_numbers_"))
+async def edit_room_numbers(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+        return
+    
+    room_id = callback.data.replace("edit_room_numbers_", "")
+    await state.set_state(RoomEditState.waiting)
+    await state.update_data(room_id=room_id, field="room_numbers")
+    
+    await callback.message.edit_text("🔢 Xona raqamlarini yuboring (masalan: 101,102,103). Bo'sh qoldirish mumkin.")
 @router.message(RoomEditState.waiting)
 async def save_room_edit(message: Message, state: FSMContext):
     if not await is_admin(str(message.from_user.id), os.getenv("SUPER_ADMIN_ID")):
@@ -605,24 +631,44 @@ async def save_room_edit(message: Message, state: FSMContext):
     elif step == "room_capacity":
         try:
             capacity = int(message.text.strip())
-            data = await state.get_data()
-            from uuid import uuid4
-            room_id_new = str(uuid4().hex[:8])
-            await add_room(room_id_new, {
-                'name': data.get('room_name', 'Yangi xona'),
-                'price': data.get('price', 200000),
-                'description': data.get('description', ''),
-                'capacity': capacity,
-                'active': 1
-            })
-            await state.clear()
-            await message.answer("✅ Xona qo'shildi!")
+            await state.update_data(capacity=capacity, step="room_quantity")
+            await message.answer("🧮 Xona sonini yuboring (raqam):")
         except:
             await message.answer("❌ Faqat raqam!")
-            
+
+    elif step == "room_quantity":
+        try:
+            quantity = int(message.text.strip())
+            await state.update_data(quantity=quantity, step="room_numbers")
+            await message.answer("🔢 Xona raqamlarini yuboring (masalan: 101,102,103). Bo'sh qoldirish mumkin.")
+        except:
+            await message.answer("❌ Faqat raqam!")
+
+    elif step == "room_numbers":
+        numbers = (message.text or "").strip()
+        data = await state.get_data()
+        from uuid import uuid4
+        room_id_new = str(uuid4().hex[:8])
+        await add_room(room_id_new, {
+            'name': data.get('room_name', 'Yangi xona'),
+            'price': data.get('price', 200000),
+            'description': data.get('description', ''),
+            'capacity': data.get('capacity', 2),
+            'quantity': data.get('quantity', 1),
+            'room_numbers': numbers,
+            'active': 1
+        })
+        await state.clear()
+        await message.answer("✅ Xona qo'shildi!")
     elif room_id and field:
         value = message.text.strip()
         if field == "price":
+            try:
+                value = int(value.replace(" ", "").replace(",", ""))
+            except:
+                await message.answer("❌ Faqat raqam!")
+                return
+        if field == "quantity":
             try:
                 value = int(value.replace(" ", "").replace(",", ""))
             except:
@@ -1004,18 +1050,58 @@ async def save_admin(message: Message, state: FSMContext):
 
 
 @router.callback_query(F.data == "available_rooms")
+@router.callback_query(F.data == "available_rooms")
 async def available_rooms_start(callback: CallbackQuery, state: FSMContext):
     if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
 
     await state.set_state(AvailabilityState.waiting)
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Bugun", callback_data="available_rooms_today"),
+         InlineKeyboardButton(text="Ertaga", callback_data="available_rooms_tomorrow")],
+        [InlineKeyboardButton(text="7 kun", callback_data="available_rooms_week")],
+        [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")],
+    ])
     await callback.message.edit_text(
         "🟢 Bo'sh xonalar\n\n"
         "Sanalarni yuboring:\n"
-        "Format: 2026-04-10 2026-04-12"
+        "Format: 2026-04-10 2026-04-12",
+        reply_markup=keyboard
     )
 
 
+@router.callback_query(F.data == "available_rooms_today")
+async def available_rooms_today(callback: CallbackQuery):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+        return
+    today = datetime.now().date()
+    check_in = today.strftime("%Y-%m-%d")
+    check_out = (today + timedelta(days=1)).strftime("%Y-%m-%d")
+    await _send_available_rooms(callback.message, check_in, check_out)
+
+
+@router.callback_query(F.data == "available_rooms_tomorrow")
+async def available_rooms_tomorrow(callback: CallbackQuery):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+        return
+    today = datetime.now().date()
+    check_in = (today + timedelta(days=1)).strftime("%Y-%m-%d")
+    check_out = (today + timedelta(days=2)).strftime("%Y-%m-%d")
+    await _send_available_rooms(callback.message, check_in, check_out)
+
+
+@router.callback_query(F.data == "available_rooms_week")
+async def available_rooms_week(callback: CallbackQuery):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+        return
+    today = datetime.now().date()
+    check_in = today.strftime("%Y-%m-%d")
+    check_out = (today + timedelta(days=7)).strftime("%Y-%m-%d")
+    await _send_available_rooms(callback.message, check_in, check_out)
+
+
+@router.message(AvailabilityState.waiting)
+@router.message(AvailabilityState.waiting)
 @router.message(AvailabilityState.waiting)
 async def available_rooms_show(message: Message, state: FSMContext):
     if not await is_admin(str(message.from_user.id), os.getenv("SUPER_ADMIN_ID")):
@@ -1033,10 +1119,11 @@ async def available_rooms_show(message: Message, state: FSMContext):
         await message.answer("❌ Sana noto'g'ri! Format: YYYY-MM-DD")
         return
 
-    rooms = await find_available_rooms(check_in, check_out, only_active=True)
     await state.clear()
+    await _send_available_rooms(message, check_in, check_out)
 
 
+@router.callback_query(F.data == "start_message")
 @router.callback_query(F.data == "start_message")
 async def start_message(callback: CallbackQuery, state: FSMContext):
     if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
@@ -1186,27 +1273,44 @@ async def delete_start_message(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("✅ Start xabar o'chirildi.")
 
-    if not rooms:
-        await message.answer("❌ Bu sanalarda bo'sh xona topilmadi.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")]
-        ]))
-        return
-
-    lines = [f"✅ Bo'sh xonalar ({check_in} → {check_out}):"]
-    for room in rooms:
-        lines.append(f"- {room.get('name')} | {format_price(room.get('price', 0))} so'm/kun")
-
-    await message.answer("\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")]
-    ]))
-
-
 def _validate_date(date_str: str) -> bool:
     try:
         datetime.strptime(date_str, '%Y-%m-%d')
         return True
     except Exception:
         return False
+
+
+def _format_room_numbers(numbers: str) -> str:
+    return numbers.strip() if numbers else ""
+
+
+async def _send_available_rooms(message: Message, check_in: str, check_out: str) -> None:
+    rooms = await find_available_rooms(check_in, check_out, only_active=True)
+    if not rooms:
+        await message.answer(
+            "вќЊ Bu sanalarda bo'sh xona topilmadi.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="в—ЂпёЏ Orqaga", callback_data="admin_back")]
+            ])
+        )
+        return
+
+    lines = [f"вњ… Bo'sh xonalar ({check_in} в†’ {check_out}):"]
+    for room in rooms:
+        available = room.get("available_count", 0)
+        numbers = _format_room_numbers(room.get("room_numbers", ""))
+        numbers_text = f" | Raqamlar: {numbers}" if numbers else ""
+        lines.append(
+            f"- {room.get('name')} | {format_price(room.get('price', 0))} so'm/kun | {available} ta{numbers_text}"
+        )
+
+    await message.answer(
+        "\n".join(lines),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="в—ЂпёЏ Orqaga", callback_data="admin_back")]
+        ])
+    )
 
 
 async def _collect_start_media_group(message: Message, state: FSMContext) -> None:
