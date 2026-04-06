@@ -118,6 +118,9 @@ async def cmd_start(message: Message, bot: Bot, state: FSMContext):
     user = message.from_user
     user_id = str(user.id)
 
+    if message.chat.type != "private":
+        return
+
     if user_id in ADMIN_IN_ADMIN_MODE:
         # Reset admin mode on /start to avoid getting stuck
         ADMIN_IN_ADMIN_MODE.discard(user_id)
@@ -381,6 +384,9 @@ async def handle_all_messages(message: Message, bot: Bot):
     user = message.from_user
     user_id = str(user.id)
     text_lower = message.text.strip().lower()
+
+    if message.chat.type != "private":
+        return
     
     ok, missing = await check_subscription(bot, user.id)
     if not ok:
