@@ -5,6 +5,7 @@ Marco Polo Hotel uchun - Barcha savolga javob beradi
 
 import os
 import re
+import json
 import logging
 from datetime import datetime
 from openai import AsyncOpenAI
@@ -16,7 +17,8 @@ from config.database import (
 
 log = logging.getLogger(__name__)
 
-client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# OpenAI Client (Xavfsiz ulanish, xato bermasligi uchun dummy kalit o'rnatilgan)
+client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY", "dummy_key_to_prevent_import_crash_during_startup"))
 MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
 # Suhbat tarixi
@@ -70,8 +72,11 @@ async def _build_system_prompt(user_platform: str = "telegram") -> str:
     if user_platform == "instagram":
         platform_note = "\nPlatforma: Instagram Direct. HTML teglari ishlatma, oddiy matn yoz."
     
+    bugun = datetime.now().strftime("%Y-%m-%d, %A")
     return f"""Sen Marco Polo Hotel ning juda ham e'tiborli, nihoyatda samimiy, xushmuomala va professional AI yordamchisisan.
 Sening asosiy vazifang — foydalanuvchining BARCHA savollariga erinmasdan, 100% TO'LIQ, BATAFSIL va ILIQ javob berish. Mijoz doimo o'zini eng qadrdon mehmonday his qilishi kerak!{platform_note}
+
+Bugungi sana va vaqt: {bugun}. Sanalarni aynan shu bugungi kunga nisbatan aniq hisoblab javob ber!
 
 ═══════════════════════════════════
 MEHMONXONA MA'LUMOTLARI:
@@ -158,140 +163,62 @@ def _is_greeting(text: str) -> bool:
     return any(t.startswith(g) or t == g for g in greetings)
 
 
-def extract_booking_info(text: str) -> dict | None:
-    """Foydalanuvchi xabaridan bron ma'lumotlarini ajratib olish"""
+async def extract_booking_info(text: str) -> dict | None:
+    """Foydalanuvchi xabaridan bron ma'lumotlarini Function Calling yordamida ajratish"""
     text_lower = text.lower().strip()
+    if not text_lower:
+        return None
 
-    name = None
-    phone = None
-    check_in = None
-    check_out = None
-    guests = None
-    room_type = None
-    room_choice_index = None
-
-    # Ism
-    name_patterns = [
-        r'ism(?:i|im|lar|larim)?[:\s]+([a-zA-ZА-Яа-яЁёа-яÀ-ÿ\s]+?)(?:,|\.|$)',
-        r'ism\s*[:\-]?\s*([a-zA-ZА-Яа-яЁёА-ЯÀ-ÿ\s]+?)(?:,|\n|$)',
-        r'name\s*[:\-]?\s*([a-zA-Z\s]+?)(?:,|\n|$)',
-        r'^([a-zA-ZА-Яа-яЁё]{2,20}(?:\s+[a-zA-ZА-Яа-яЁё]{2,20})?)$',
-    ]
-    for pattern in name_patterns:
-        name_match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
-        if name_match:
-            candidate = name_match.group(1).strip()
-            # Bo'sh so'zlarni tozalash
-            candidate = re.sub(r'\s+', ' ', candidate).strip()
-            if 2 < len(candidate) < 50:
-                name = candidate.title()
-                break
-
-    # Telefon
-    phone_match = re.search(r'\+?998[\d]{9}', text)
-    if phone_match:
-        phone = phone_match.group(0)
-        if not phone.startswith('+'):
-            phone = '+' + phone
-
-    # Sanalar — oylar nomi bilan
-    month_map = {
-        'yanvar': '01', 'yanvarь': '01',
-        'fevral': '02', 'fevralь': '02',
-        'mart': '03',
-        'aprel': '04',
-        'may': '05',
-        'iyun': '06', 'iyunь': '06',
-        'iyul': '07', 'iyulь': '07',
-        'avgust': '08',
-        'sentabr': '09', 'sentyabr': '09', 'sentябр': '09',
-        'oktabr': '10', 'oktyabr': '10',
-        'noyabr': '11',
-        'dekabr': '12',
-    }
-
-    year = datetime.now().year
-    dates_found = []
-
-    for month_name, month_num in month_map.items():
-        pattern = rf'(\d{{1,2}})\s*{month_name}(?:dan|gatacha|ga|da)?'
-        matches = re.findall(pattern, text_lower)
-        for m in matches:
-            dates_found.append(f"{year}-{month_num}-{m.zfill(2)}")
-
-    if len(dates_found) >= 1:
-        check_in = dates_found[0]
-    if len(dates_found) >= 2:
-        check_out = dates_found[1]
-
-    # YYYY-MM-DD formatidagi sanalar
-    if not check_in or not check_out:
-        date_std = re.findall(r'(\d{4})[-./](\d{1,2})[-./](\d{1,2})', text)
-        if len(date_std) >= 1 and not check_in:
-            check_in = f"{date_std[0][0]}-{date_std[0][1].zfill(2)}-{date_std[0][2].zfill(2)}"
-        if len(date_std) >= 2 and not check_out:
-            check_out = f"{date_std[1][0]}-{date_std[1][1].zfill(2)}-{date_std[1][2].zfill(2)}"
-
-    # DD-MM-YYYY formatidagi sanalar
-    if not check_in or not check_out:
-        date_dmy = re.findall(r'(\d{1,2})[-./](\d{1,2})[-./](\d{2,4})', text)
-        for d, m, y in date_dmy:
-            if len(y) == 2:
-                y = "20" + y
-            formatted = f"{y}-{m.zfill(2)}-{d.zfill(2)}"
-            if not check_in:
-                check_in = formatted
-            elif not check_out:
-                check_out = formatted
-
-    # Mehmonlar soni
-    guests_match = re.search(
-        r'(\d+)\s*(?:kishi|odam|mehmon|kishilik|nafar|ta kishi)',
-        text_lower
-    )
-    if guests_match:
-        guests = int(guests_match.group(1))
-
-    # Xona turi
-    room_keywords = [
-        ('premium', 'premium'),
-        ('deluxe', 'deluxe'),
-        ('suite', 'suite'),
-        ('suit', 'suite'),
-        ('люкс', 'suite'),
-        ('vip', 'vip'),
-        ('family', 'family'),
-        ('oilaviy', 'family'),
-        ('standart', 'standart'),
-        ('standard', 'standart'),
-        ('econom', 'standart'),
-    ]
-    for keyword, room_id in room_keywords:
-        if keyword in text_lower:
-            room_type = room_id
-            break
-
-    # Raqam bilan xona tanlash (1, 2, 3 ...)
-    room_index_match = re.search(
-        r'\b([1-9])\s*(?:-?\s*(?:xona|raqam|variant|tanladim|maqul|kerak|bo\'ladi))?\b',
-        text_lower
-    )
-    if room_index_match:
-        try:
-            room_choice_index = int(room_index_match.group(1))
-        except Exception:
-            room_choice_index = None
-
-    if any([name, phone, check_in, check_out, guests, room_type, room_choice_index]):
-        return {
-            'name': name,
-            'phone': phone,
-            'check_in': check_in,
-            'check_out': check_out,
-            'guests': guests,
-            'room_type': room_type,
-            'room_choice_index': room_choice_index,
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "extract_booking",
+                "description": "Foydalanuvchi yozgan matndan mehmonxona bron parametrlarini ajratib olish.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "description": "Mijozning to'liq ismi (agar yozgan bo'lsa)"},
+                        "phone": {"type": "string", "description": "Telefon raqami (masalan +998901234567)"},
+                        "check_in": {"type": "string", "description": "Kelish sanasi YYYY-MM-DD formatida (Bugungi sanaga nisbatan top)"},
+                        "check_out": {"type": "string", "description": "Ketish sanasi YYYY-MM-DD formatida"},
+                        "guests": {"type": "integer", "description": "Mehmonlar yoki odamlar soni (raqamda)"},
+                        "room_type": {"type": "string", "description": "Xona turi yoki nomi (masalan: delux, premium)"},
+                        "room_choice_index": {"type": "integer", "description": "Agar ro'yxatdan tartib raqam bilan xona tanlagan bo'lsa (1, 2, 3...)"}
+                    }
+                }
+            }
         }
+    ]
+
+    try:
+        bugun = datetime.now().strftime("%Y-%m-%d, %A")
+        response = await client.chat.completions.create(
+            model=MODEL,
+            messages=[
+                {"role": "system", "content": f"Foydalanuvchi gapidan ma'lumotlarni aniq ajrat. Bugun: {bugun}"},
+                {"role": "user", "content": text}
+            ],
+            tools=tools,
+            tool_choice={"type": "function", "function": {"name": "extract_booking"}},
+            temperature=0.0
+        )
+
+        message = response.choices[0].message
+        if message.tool_calls:
+            args = json.loads(message.tool_calls[0].function.arguments)
+            if any(args.values()):
+                return {
+                    'name': args.get('name'),
+                    'phone': args.get('phone'),
+                    'check_in': args.get('check_in'),
+                    'check_out': args.get('check_out'),
+                    'guests': args.get('guests'),
+                    'room_type': args.get('room_type'),
+                    'room_choice_index': args.get('room_choice_index')
+                }
+    except Exception as e:
+        log.error(f"[AI FUNCTION CALL ERROR] {e}")
 
     return None
 
@@ -680,9 +607,9 @@ async def get_ai_response(
         return reply
 
     # Bron jarayoni aktiv bo'lsa yoki bron so'rasa
-    booking_info = extract_booking_info(user_message) if (
-        user_id in BOOKING_DRAFT or _is_booking_intent(user_message)
-    ) else None
+    booking_info = None
+    if user_id in BOOKING_DRAFT or _is_booking_intent(user_message):
+        booking_info = await extract_booking_info(user_message)
 
     booking_reply = await _handle_booking_flow(
         user_id, user_message, platform, booking_info
