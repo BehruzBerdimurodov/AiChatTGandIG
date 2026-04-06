@@ -83,9 +83,11 @@ async def main():
 
     log.info("Hotel AI Chatbot v4 ishga tushmoqda... 🏨")
     log.info("Hotel AI Chatbot v4 ishga tushmoqda... 🏨")
+    log.info("Hotel AI Chatbot v4 ishga tushmoqda... 🏨")
     run_mode = os.getenv("RUN_MODE", "").lower()
     webhook_url = os.getenv("WEBHOOK_URL")
-    if run_mode == "webhook" or webhook_url:
+    railway_env = os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("RAILWAY_PROJECT_ID")
+    if run_mode == "webhook" or webhook_url or railway_env:
         log.info("Webhook rejimi: faqat FastAPI server ishga tushadi.")
         await run_api()
     else:
