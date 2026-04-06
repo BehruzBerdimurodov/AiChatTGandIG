@@ -20,7 +20,8 @@ from aiogram.types import Update
 from app.ai_handler import get_ai_response, active_users, send_order_to_admins, BOOKING_STORE
 from app.manychat import format_manychat_response
 from config.database import (
-    init_db, register_user, create_order, get_hotel, get_admins, log_activity, get_db, get_user_count, is_room_available
+    init_db, register_user, create_order, get_hotel, get_admins,
+    log_activity, get_db, get_user_count, is_room_available
 )
 from datetime import datetime
 from bot.handlers import user as user_handlers, admin as admin_handlers
@@ -33,7 +34,6 @@ def require_internal_token(x_internal_token: str | None):
     if not expected_token:
         log.error("INTERNAL_API_TOKEN is not configured")
         raise HTTPException(status_code=503, detail="Internal API is not configured")
-
     if x_internal_token != expected_token:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -93,6 +93,7 @@ async def lifespan(app: FastAPI):
         except Exception:
             pass
 
+
 app = FastAPI(
     title="Marco Polo Hotel Bot API",
     version="4.0.0",
@@ -107,10 +108,12 @@ class ManyChatPayload(BaseModel):
     message: str
     platform: Optional[str] = "instagram"
 
+
 class MakePayload(BaseModel):
     user_id: str
     first_name: Optional[str] = "Mehmon"
     message: str
+
 
 class ChatfuelPayload(BaseModel):
     chatfuel_user_id: str
@@ -125,14 +128,12 @@ class InstagramDM(BaseModel):
     timestamp: Optional[str] = ""
 
 
-
 async def _confirm_booking(user_id: str, platform: str) -> Optional[str]:
     if user_id not in BOOKING_STORE:
         return None
 
     booking_data = BOOKING_STORE[user_id]
     order_id = f"ORD-{datetime.now().strftime('%Y%m%d%H%M%S')}"
-
     booking_data["id"] = order_id
     booking_data["source"] = platform
 
@@ -149,44 +150,55 @@ async def _confirm_booking(user_id: str, platform: str) -> Optional[str]:
 
         if admins:
             try:
-                bot_local = Bot(token=os.getenv("TELEGRAM_BOT_TOKEN"))
-                notify_text = f"""?? <b>{platform.upper()}DAN YANGI BRON!</b>
-
-????????????????????
-?? Xona: <b>{booking_data.get('room_name')}</b>
-?? {booking_data.get('check_in')} > {booking_data.get('check_out')}
-?? {booking_data.get('guests')} kishi
-?? <b>{booking_data.get('total_price'):,} so'm</b>
-
-?? {booking_data.get('name')}
-?? {booking_data.get('phone')}
-?? Platform: {platform.title()}
-????????????????????"""
+                notify_bot = Bot(token=os.getenv("TELEGRAM_BOT_TOKEN"))
+                price_fmt = f"{booking_data.get('total_price', 0):,}".replace(",", " ")
+                notify_text = (
+                    f"🔔 <b>{platform.upper()}DAN YANGI BRON!</b>\n\n"
+                    f"════════════════════════\n"
+                    f"🏨 Xona: <b>{booking_data.get('room_name')}</b>\n"
+                    f"📅 {booking_data.get('check_in')} → {booking_data.get('check_out')}\n"
+                    f"👥 {booking_data.get('guests')} kishi\n"
+                    f"💰 <b>{price_fmt} so'm</b>\n\n"
+                    f"👤 {booking_data.get('name')}\n"
+                    f"📞 {booking_data.get('phone')}\n"
+                    f"📱 Platform: {platform.title()}\n"
+                    f"════════════════════════"
+                )
                 for admin_id in admins:
-                    await bot_local.send_message(int(admin_id), notify_text)
+                    try:
+                        await notify_bot.send_message(int(admin_id), notify_text)
+                    except Exception as e:
+                        log.error(f"Admin notify error for {admin_id}: {e}")
+
                 group_id = os.getenv("ORDERS_GROUP_ID")
                 if group_id:
-                    await bot_local.send_message(int(group_id), notify_text)
+                    try:
+                        await notify_bot.send_message(int(group_id), notify_text)
+                    except Exception as e:
+                        log.error(f"Group notify error: {e}")
+
                 log.info(f"[{platform.upper()}] Admin notified: {len(admins)} admins")
             except Exception as e:
                 log.error(f"[{platform.upper()}] Admin notification error: {e}")
 
-        reply = f"""? <b>Broningiz tasdiqlandi!</b>
-
-?? Xona: {booking_data.get('room_name')}
-?? Kelish: {booking_data.get('check_in')}
-?? Ketish: {booking_data.get('check_out')}
-?? {booking_data.get('guests')} kishi
-?? Jami: {booking_data.get('total_price'):,} so'm
-
-?? {booking_data.get('name')}
-?? {booking_data.get('phone')}
-
-Tez orada operator siz bilan bog'lanadi!"""
+        price_fmt = f"{booking_data.get('total_price', 0):,}".replace(",", " ")
+        reply = (
+            f"✅ <b>Broningiz tasdiqlandi!</b>\n\n"
+            f"🏨 Xona: {booking_data.get('room_name')}\n"
+            f"📅 Kelish: {booking_data.get('check_in')}\n"
+            f"📅 Ketish: {booking_data.get('check_out')}\n"
+            f"👥 {booking_data.get('guests')} kishi\n"
+            f"💰 Jami: {price_fmt} so'm\n\n"
+            f"👤 {booking_data.get('name')}\n"
+            f"📞 {booking_data.get('phone')}\n\n"
+            f"Tez orada operator siz bilan bog'lanadi!"
+        )
         return reply
     except Exception as e:
         log.error(f"[{platform.upper()} BOOKING] Save error: {e}")
-        return "? Xatolik yuz berdi. Keyinroq qayta urinib ko'ring."
+        return "❌ Xatolik yuz berdi. Keyinroq qayta urinib ko'ring."
+
+
 @app.post("/webhook/telegram")
 async def telegram_webhook(
     request: Request,
@@ -261,11 +273,15 @@ async def manychat_webhook(payload: ManyChatPayload):
         first_name=payload.first_name or "Mehmon"
     )
 
-    if user_id in BOOKING_STORE and message in ['tasdiqlayman', 'tasdiq', 'ha', 'buyurtma tasdiqlayman', 'bron tasdiqlayman']:
+    if user_id in BOOKING_STORE and message in [
+        'tasdiqlayman', 'tasdiq', 'ha', 'buyurtma tasdiqlayman', 'bron tasdiqlayman'
+    ]:
         reply = await _confirm_booking(user_id, "instagram")
         return format_manychat_response(reply or "")
 
-    ai_response = await get_ai_response(user_id, message_raw, payload.first_name or "Mehmon", platform="instagram")
+    ai_response = await get_ai_response(
+        user_id, message_raw, payload.first_name or "Mehmon", platform="instagram"
+    )
     return format_manychat_response(ai_response)
 
 
@@ -288,7 +304,9 @@ async def chatfuel_webhook(request: Request):
         first_name=first_name,
     )
 
-    if user_id in BOOKING_STORE and msg_lower in ['tasdiqlayman', 'tasdiq', 'ha', 'buyurtma tasdiqlayman', 'bron tasdiqlayman']:
+    if user_id in BOOKING_STORE and msg_lower in [
+        'tasdiqlayman', 'tasdiq', 'ha', 'buyurtma tasdiqlayman', 'bron tasdiqlayman'
+    ]:
         reply = await _confirm_booking(user_id, "instagram")
         return JSONResponse({"messages": [{"text": reply or ""}]})
 
@@ -301,30 +319,29 @@ async def instagram_webhook(request: Request):
     """Instagram Direct API webhook"""
     try:
         body = await request.json()
-        
+
         if body.get("object") == "instagram":
             for entry in body.get("entry", []):
                 for messaging in entry.get("messaging", []):
                     sender_id = messaging.get("sender", {}).get("id")
                     message_text = messaging.get("message", {}).get("text", "")
-                    
+
                     if message_text and sender_id:
                         log.info(f"[Instagram DM] {sender_id}: {message_text[:60]}")
-                        
+
                         await register_user(
                             user_id=f"ig_{sender_id}",
                             user_type="instagram",
                             first_name="Instagram User"
                         )
-                        
+
                         reply = await get_ai_response(
                             user_id=f"ig_{sender_id}",
                             user_message=message_text,
                             user_name="Instagram foydalanuvchisi",
                             platform="instagram"
                         )
-                        
-                        # Send reply back to Instagram
+
                         ig_token = os.getenv("INSTAGRAM_ACCESS_TOKEN")
                         if ig_token:
                             import httpx
@@ -338,27 +355,12 @@ async def instagram_webhook(request: Request):
                             log.info(f"[Instagram Reply] Sent to {sender_id}")
                         else:
                             log.warning("INSTAGRAM_ACCESS_TOKEN not set!")
-                            
+
                         await log_activity(f"ig_{sender_id}", "instagram_dm", message_text[:50])
-                        
+
         return {"status": "ok"}
     except Exception as e:
         log.error(f"Instagram webhook error: {e}")
-        return {"status": "error"}
-
-
-@app.post("/webhook/telegram")
-async def telegram_webhook(request: Request, bot_token: str = None):
-    """Telegram bot uchun webhook endpoint"""
-    if not bot_token or bot_token != os.getenv("TELEGRAM_BOT_TOKEN"):
-        raise HTTPException(status_code=401, detail="Unauthorized")
-    
-    try:
-        body = await request.json()
-        log.info(f"[Telegram Webhook] Update received: {body.get('update_id', 'N/A')}")
-        return {"status": "ok"}
-    except Exception as e:
-        log.error(f"Telegram webhook error: {e}")
         return {"status": "error"}
 
 
@@ -368,13 +370,13 @@ async def verify_instagram(request: Request):
     mode = request.query_params.get("hub.mode")
     token = request.query_params.get("hub.verify_token")
     challenge = request.query_params.get("hub.challenge")
-    
+
     verify_token = os.getenv("INSTAGRAM_VERIFY_TOKEN")
 
     if not verify_token:
         log.error("INSTAGRAM_VERIFY_TOKEN is not configured")
         raise HTTPException(status_code=503, detail="Instagram verification is not configured")
-    
+
     if mode == "subscribe" and token == verify_token:
         log.info("Instagram webhook verified successfully")
         return Response(content=challenge, media_type="text/plain")
@@ -396,13 +398,16 @@ class OrderPayload(BaseModel):
 
 
 @app.post("/api/order/create")
-async def create_order_api(order: OrderPayload, x_internal_token: str | None = Header(default=None)):
+async def create_order_api(
+    order: OrderPayload,
+    x_internal_token: str | None = Header(default=None)
+):
     """Bron qilish API"""
     require_internal_token(x_internal_token)
 
     import uuid
     order_id = f"ORD-{uuid.uuid4().hex[:10].upper()}"
-    
+
     order_data = {
         'id': order_id,
         'user_id': order.user_id,
@@ -417,7 +422,7 @@ async def create_order_api(order: OrderPayload, x_internal_token: str | None = H
         'notes': order.notes or '',
         'source': 'api'
     }
-    
+
     try:
         available = await is_room_available(order.room_id, order.check_in, order.check_out)
         if not available:
@@ -432,6 +437,8 @@ async def create_order_api(order: OrderPayload, x_internal_token: str | None = H
         await create_order(order_data)
         await log_activity(order.user_id, "api_order", f"Order {order_id} created via API")
         return {"status": "success", "order_id": order_id}
+    except HTTPException:
+        raise
     except Exception as e:
         log.error(f"Order creation error: {e}")
         return {"status": "error", "message": str(e)}
@@ -441,9 +448,9 @@ async def create_order_api(order: OrderPayload, x_internal_token: str | None = H
 async def get_stats():
     """Statistika API"""
     from config.database import get_monthly_stats
-    
+
     monthly = await get_monthly_stats()
-    
+
     return {
         "total_users": await get_user_count(),
         "total_orders": monthly['total_orders'],
@@ -453,10 +460,11 @@ async def get_stats():
 
 
 @app.post("/notify/admins")
-async def notify_admins(request: Request, x_internal_token: str | None = Header(default=None)):
+async def notify_admins(
+    request: Request,
+    x_internal_token: str | None = Header(default=None)
+):
     """Adminlarni xabardor qilish API"""
-    from config.database import get_admins
-
     require_internal_token(x_internal_token)
 
     try:
@@ -464,6 +472,7 @@ async def notify_admins(request: Request, x_internal_token: str | None = Header(
         message = body.get("message", "")
         if not message.strip():
             raise HTTPException(status_code=400, detail="Message is required")
+
         admin_ids = await get_admins()
         super_admin = os.getenv("SUPER_ADMIN_ID")
         if super_admin:
@@ -474,12 +483,11 @@ async def notify_admins(request: Request, x_internal_token: str | None = Header(
             raise HTTPException(status_code=503, detail="Telegram bot token is not configured")
 
         sent = 0
-        from aiogram import Bot
-
-        bot = Bot(token=bot_token)
+        from aiogram import Bot as AiogramBot
+        notify_bot = AiogramBot(token=bot_token)
         for admin_id in dict.fromkeys(admin_ids):
             try:
-                await bot.send_message(int(admin_id), message)
+                await notify_bot.send_message(int(admin_id), message)
                 sent += 1
             except Exception as exc:
                 log.error(f"Admin notification error for {admin_id}: {exc}")

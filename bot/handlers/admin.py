@@ -14,7 +14,6 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
 
 from app.ai_handler import generate_post, active_users
-from config.database import is_admin
 from config.database import (
     is_admin, get_rooms, get_room, add_room, update_room, delete_room,
     get_hotel, update_hotel, get_channels, add_channel as db_add_channel, remove_channel,
@@ -795,7 +794,6 @@ async def add_channel(callback: CallbackQuery, state: FSMContext):
 
 
 @router.message(ChannelState.waiting)
-@router.message(ChannelState.waiting)
 async def save_channel(message: Message, state: FSMContext, bot: Bot):
     if not await is_admin(str(message.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         await state.clear()
@@ -1050,7 +1048,6 @@ async def save_admin(message: Message, state: FSMContext):
 
 
 @router.callback_query(F.data == "available_rooms")
-@router.callback_query(F.data == "available_rooms")
 async def available_rooms_start(callback: CallbackQuery, state: FSMContext):
     if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
@@ -1101,8 +1098,6 @@ async def available_rooms_week(callback: CallbackQuery):
 
 
 @router.message(AvailabilityState.waiting)
-@router.message(AvailabilityState.waiting)
-@router.message(AvailabilityState.waiting)
 async def available_rooms_show(message: Message, state: FSMContext):
     if not await is_admin(str(message.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         await state.clear()
@@ -1123,7 +1118,6 @@ async def available_rooms_show(message: Message, state: FSMContext):
     await _send_available_rooms(message, check_in, check_out)
 
 
-@router.callback_query(F.data == "start_message")
 @router.callback_query(F.data == "start_message")
 async def start_message(callback: CallbackQuery, state: FSMContext):
     if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
@@ -1187,7 +1181,6 @@ async def save_start_message(message: Message, state: FSMContext):
         await _collect_start_media_group(message, state)
         return
 
-    payload = {"type": "text", "text": ""}
     payload = {"type": "text", "text": ""}
 
     if message.location:
@@ -1289,14 +1282,14 @@ async def _send_available_rooms(message: Message, check_in: str, check_out: str)
     rooms = await find_available_rooms(check_in, check_out, only_active=True)
     if not rooms:
         await message.answer(
-            "вќЊ Bu sanalarda bo'sh xona topilmadi.",
+            "❌ Bu sanalarda bo'sh xona topilmadi.",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="в—ЂпёЏ Orqaga", callback_data="admin_back")]
+                [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")]
             ])
         )
         return
 
-    lines = [f"вњ… Bo'sh xonalar ({check_in} в†’ {check_out}):"]
+    lines = [f"✅ Bo'sh xonalar ({check_in} → {check_out}):"]
     for room in rooms:
         available = room.get("available_count", 0)
         numbers = _format_room_numbers(room.get("room_numbers", ""))
@@ -1308,7 +1301,7 @@ async def _send_available_rooms(message: Message, check_in: str, check_out: str)
     await message.answer(
         "\n".join(lines),
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="в—ЂпёЏ Orqaga", callback_data="admin_back")]
+            [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")]
         ])
     )
 
@@ -1369,9 +1362,9 @@ async def _collect_post_media_group(message: Message, state: FSMContext) -> None
             step="post_preview"
         )
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="вњ… Yuborish", callback_data="send_post")],
-            [InlineKeyboardButton(text="вќЊ Bekor", callback_data="admin_back")]
+            [InlineKeyboardButton(text="✅ Yuborish", callback_data="send_post")],
+            [InlineKeyboardButton(text="❌ Bekor", callback_data="admin_back")]
         ])
-        await message.answer("рџ“ќ <b>Post:</b>\n\nRasmlar qabul qilindi.", reply_markup=keyboard)
+        await message.answer("📝 <b>Post:</b>\n\nRasmlar qabul qilindi.", reply_markup=keyboard)
 
     group["task"] = asyncio.create_task(finalize())

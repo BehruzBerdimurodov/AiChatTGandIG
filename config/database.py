@@ -41,7 +41,7 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        
+
         await db.execute("""
             CREATE TABLE IF NOT EXISTS rooms (
                 id TEXT PRIMARY KEY,
@@ -66,7 +66,7 @@ async def init_db():
             await db.execute("ALTER TABLE rooms ADD COLUMN room_numbers TEXT DEFAULT ''")
         except Exception:
             pass
-        
+
         await db.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 user_id TEXT PRIMARY KEY,
@@ -81,7 +81,7 @@ async def init_db():
                 last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        
+
         await db.execute("""
             CREATE TABLE IF NOT EXISTS orders (
                 id TEXT PRIMARY KEY,
@@ -103,7 +103,7 @@ async def init_db():
                 FOREIGN KEY (room_id) REFERENCES rooms(id)
             )
         """)
-        
+
         await db.execute("""
             CREATE TABLE IF NOT EXISTS admins (
                 user_id TEXT PRIMARY KEY,
@@ -111,7 +111,7 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        
+
         await db.execute("""
             CREATE TABLE IF NOT EXISTS channels (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -122,7 +122,7 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        
+
         await db.execute("""
             CREATE TABLE IF NOT EXISTS post_channel (
                 id INTEGER PRIMARY KEY,
@@ -130,7 +130,7 @@ async def init_db():
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        
+
         await db.execute("""
             CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -141,7 +141,7 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        
+
         await db.execute("""
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
@@ -149,7 +149,7 @@ async def init_db():
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        
+
         await db.execute("""
             CREATE TABLE IF NOT EXISTS blocked_users (
                 user_id TEXT PRIMARY KEY,
@@ -157,7 +157,7 @@ async def init_db():
                 blocked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        
+
         await db.execute("""
             CREATE TABLE IF NOT EXISTS user_activities (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -167,7 +167,7 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        
+
         await db.execute("""
             CREATE TABLE IF NOT EXISTS feedback (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -177,12 +177,12 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        
+
         async with db.execute("SELECT COUNT(*) FROM hotel") as cursor:
             count = await cursor.fetchone()
             if count[0] == 0:
                 await db.execute("INSERT INTO hotel DEFAULT VALUES")
-        
+
         async with db.execute("SELECT COUNT(*) FROM rooms") as cursor:
             count = await cursor.fetchone()
             if count[0] == 0:
@@ -194,7 +194,10 @@ async def init_db():
                     ('family', 'Family Room', 400000, 'Oilaviy xona, 2 yotoq, SMART TV, Wi-Fi, SPA, Oshxona', 4, '📺 SMART TV|🌐 Wi-Fi|❄️ Konditsioner|🛏️ 2 yotoq|💆 SPA|🍳 Oshxona', 1, 1, ''),
                     ('premium', 'Premium Room', 450000, 'Eng yaxshi xona, katta yotoq, SPA, Lounge bar, barcha qulayliklar', 2, '📺 SMART TV|🌐 Wi-Fi|❄️ Konditsioner|🛏️ Katta yotoq|💆 SPA|🍷 Lounge bar|🛁 Jakuzzi|🍷 Minibar', 1, 1, ''),
                 ]
-                await db.executemany("INSERT INTO rooms (id, name, price, description, capacity, amenities, active, quantity, room_numbers) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", default_rooms)
+                await db.executemany(
+                    "INSERT INTO rooms (id, name, price, description, capacity, amenities, active, quantity, room_numbers) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    default_rooms
+                )
 
 
 async def get_hotel() -> Dict:
@@ -248,8 +251,8 @@ async def delete_room(room_id: str):
         await db.execute("DELETE FROM rooms WHERE id = ?", (room_id,))
 
 
-async def register_user(user_id: str, user_type: str = 'telegram', first_name: str = '', 
-                  last_name: str = '', username: str = '', phone: str = ''):
+async def register_user(user_id: str, user_type: str = 'telegram', first_name: str = '',
+                        last_name: str = '', username: str = '', phone: str = ''):
     async with get_db() as db:
         await db.execute("""
             INSERT INTO users (user_id, user_type, first_name, last_name, username, phone, last_activity)
@@ -341,7 +344,10 @@ async def get_order(order_id: str) -> Optional[Dict]:
 
 async def update_order(order_id: str, field: str, value):
     async with get_db() as db:
-        await db.execute(f"UPDATE orders SET {field} = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (value, order_id))
+        await db.execute(
+            f"UPDATE orders SET {field} = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (value, order_id)
+        )
 
 
 async def get_orders_count(status: str = None) -> int:
@@ -359,11 +365,16 @@ async def get_orders_count(status: str = None) -> int:
 async def get_revenue(month: str = None) -> int:
     async with get_db() as db:
         if month:
-            async with db.execute("SELECT SUM(total_price) FROM orders WHERE status = 'completed' AND created_at LIKE ?", (f'{month}%',)) as cursor:
+            async with db.execute(
+                "SELECT SUM(total_price) FROM orders WHERE status = 'completed' AND created_at LIKE ?",
+                (f'{month}%',)
+            ) as cursor:
                 row = await cursor.fetchone()
                 return row[0] if row[0] else 0
         else:
-            async with db.execute("SELECT SUM(total_price) FROM orders WHERE status = 'completed'") as cursor:
+            async with db.execute(
+                "SELECT SUM(total_price) FROM orders WHERE status = 'completed'"
+            ) as cursor:
                 row = await cursor.fetchone()
                 return row[0] if row[0] else 0
 
@@ -430,15 +441,6 @@ async def find_available_rooms(check_in: str, check_out: str, only_active: bool 
             room["available_count"] = remaining
             available.append(room)
     return available
-    async with get_db() as db:
-        if month:
-            async with db.execute("SELECT SUM(total_price) FROM orders WHERE status = 'completed' AND created_at LIKE ?", (f'{month}%',)) as cursor:
-                row = await cursor.fetchone()
-                return row[0] if row[0] else 0
-        else:
-            async with db.execute("SELECT SUM(total_price) FROM orders WHERE status = 'completed'") as cursor:
-                row = await cursor.fetchone()
-                return row[0] if row[0] else 0
 
 
 async def get_admins() -> List[str]:
@@ -479,7 +481,7 @@ async def add_channel(channel_data: Dict):
         await db.execute("""
             INSERT OR REPLACE INTO channels (channel_id, title, username, type)
             VALUES (?, ?, ?, ?)
-        """, (channel_data['channel_id'], channel_data['title'], 
+        """, (channel_data['channel_id'], channel_data['title'],
               channel_data.get('username', ''), channel_data.get('type', 'subscription')))
 
 
@@ -527,16 +529,16 @@ async def get_daily_stats() -> Dict:
     async with get_db() as db:
         async with db.execute("SELECT COUNT(*) FROM users WHERE created_at LIKE ?", (f'{today}%',)) as cursor:
             new_users = (await cursor.fetchone())[0]
-        
+
         async with db.execute("SELECT COUNT(*) FROM orders WHERE created_at LIKE ?", (f'{today}%',)) as cursor:
             new_orders = (await cursor.fetchone())[0]
-        
+
         async with db.execute("SELECT COUNT(*) FROM messages WHERE created_at LIKE ?", (f'{today}%',)) as cursor:
             messages = (await cursor.fetchone())[0]
-        
+
         async with db.execute("SELECT COUNT(*) FROM orders WHERE status = 'pending'") as cursor:
             pending_orders = (await cursor.fetchone())[0]
-        
+
         return {
             'new_users': new_users,
             'new_orders': new_orders,
@@ -550,13 +552,16 @@ async def get_monthly_stats() -> Dict:
     async with get_db() as db:
         async with db.execute("SELECT COUNT(*) FROM users WHERE created_at LIKE ?", (f'{month}%',)) as cursor:
             new_users = (await cursor.fetchone())[0]
-        
+
         async with db.execute("SELECT COUNT(*) FROM orders WHERE created_at LIKE ?", (f'{month}%',)) as cursor:
             total_orders = (await cursor.fetchone())[0]
-        
-        async with db.execute("SELECT SUM(total_price) FROM orders WHERE status = 'completed' AND created_at LIKE ?", (f'{month}%',)) as cursor:
+
+        async with db.execute(
+            "SELECT SUM(total_price) FROM orders WHERE status = 'completed' AND created_at LIKE ?",
+            (f'{month}%',)
+        ) as cursor:
             revenue = (await cursor.fetchone())[0] or 0
-        
+
         return {
             'new_users': new_users,
             'total_orders': total_orders,
