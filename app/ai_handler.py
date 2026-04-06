@@ -17,8 +17,18 @@ from config.database import (
 
 log = logging.getLogger(__name__)
 
-# OpenAI Client (Xavfsiz ulanish, xato bermasligi uchun dummy kalit o'rnatilgan)
-client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY", "dummy_key_to_prevent_import_crash_during_startup"))
+# OpenAI Client (Lazy intialization)
+_client: AsyncOpenAI | None = None
+
+def get_openai_client() -> AsyncOpenAI:
+    global _client
+    if _client is None:
+        key = os.getenv("OPENAI_API_KEY")
+        if not key or key == "dummy_key_to_prevent_import_crash_during_startup" or key.strip() == "":
+            raise ValueError("OPENAI_API_KEY is missing or invalid! Please check environment variables.")
+        _client = AsyncOpenAI(api_key=key)
+    return _client
+
 MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
 # Suhbat tarixi
@@ -193,6 +203,7 @@ async def extract_booking_info(text: str) -> dict | None:
 
     try:
         bugun = datetime.now().strftime("%Y-%m-%d, %A")
+        client = get_openai_client()
         response = await client.chat.completions.create(
             model=MODEL,
             messages=[
@@ -291,6 +302,7 @@ async def _ai_reply(user_id: str, user_message: str, platform: str = "telegram")
     ]
 
     try:
+        client = get_openai_client()
         response = await client.chat.completions.create(
             model=MODEL,
             messages=messages,
@@ -651,6 +663,7 @@ async def generate_post(topic: str, hotel_name: str) -> str:
         f"📞 {hotel.get('phone', '+998773397171')} | {hotel.get('telegram', '@Marcopolohotel_1')}"
     )
     try:
+        client = get_openai_client()
         response = await client.chat.completions.create(
             model=MODEL,
             messages=[{"role": "user", "content": prompt}],
@@ -658,7 +671,8 @@ async def generate_post(topic: str, hotel_name: str) -> str:
             temperature=0.8,
         )
         return response.choices[0].message.content.strip()
-    except Exception:
+    except Exception as e:
+        log.error(f"Post yaratishda xatolik: {e}")
         return "Post yaratishda xatolik. Qayta urinib ko'ring."
 
 

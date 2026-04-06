@@ -67,26 +67,31 @@ async def send_start_message(bot: Bot, chat_id: int):
         return False
 
     sent_any = False
-    for payload in messages:
-        msg_type = payload.get("type")
-        if msg_type == "text":
-            await bot.send_message(chat_id, payload.get("text", ""))
-            sent_any = True
-        elif msg_type == "photo":
-            await bot.send_photo(chat_id, payload.get("file_id"), caption=payload.get("caption", ""))
-            sent_any = True
-        elif msg_type == "video":
-            await bot.send_video(chat_id, payload.get("file_id"), caption=payload.get("caption", ""))
-            sent_any = True
-        elif msg_type == "voice":
-            await bot.send_voice(chat_id, payload.get("file_id"), caption=payload.get("caption", ""))
-            sent_any = True
-        elif msg_type == "document":
-            await bot.send_document(chat_id, payload.get("file_id"), caption=payload.get("caption", ""))
-            sent_any = True
-        elif msg_type == "location":
-            await bot.send_location(chat_id, payload.get("lat"), payload.get("lng"))
-            sent_any = True
+    try:
+        for payload in messages:
+            if not isinstance(payload, dict):
+                continue
+            msg_type = payload.get("type")
+            if msg_type == "text":
+                await bot.send_message(chat_id, payload.get("text", ""))
+                sent_any = True
+            elif msg_type == "photo":
+                await bot.send_photo(chat_id, payload.get("file_id"), caption=payload.get("caption", ""))
+                sent_any = True
+            elif msg_type == "video":
+                await bot.send_video(chat_id, payload.get("file_id"), caption=payload.get("caption", ""))
+                sent_any = True
+            elif msg_type == "voice":
+                await bot.send_voice(chat_id, payload.get("file_id"), caption=payload.get("caption", ""))
+                sent_any = True
+            elif msg_type == "document":
+                await bot.send_document(chat_id, payload.get("file_id"), caption=payload.get("caption", ""))
+                sent_any = True
+            elif msg_type == "location":
+                await bot.send_location(chat_id, payload.get("lat"), payload.get("lng"))
+                sent_any = True
+    except Exception as e:
+        log.error(f"Error sending start messages: {e}")
     return sent_any
 
 class OnboardState(StatesGroup):
