@@ -1,4 +1,4 @@
-"""
+﻿"""
 AI Handler - Professional AI yordamchi
 Bron qilish va barcha savollarga javob beradi
 """
@@ -37,9 +37,9 @@ async def _build_system_prompt(user_platform: str = "telegram") -> str:
     hotel_phone2 = hotel.get('phone_2', '+998771577171')
     hotel_address = hotel.get('address', "Do'mbirobod Naqqoshlik 121A")
 
-    platform_intro = "SIZ: Marco Polo Hotel 🏩 - Professional Telegram AI yordamchisi"
+    platform_intro = "SIZ: Marco Polo Hotel рџЏ© - Professional Telegram AI yordamchisi"
     if user_platform == "instagram":
-        platform_intro = "SIZ: Marco Polo Hotel 🏩 - Professional Instagram Direct AI yordamchisi"
+        platform_intro = "SIZ: Marco Polo Hotel рџЏ© - Professional Instagram Direct AI yordamchisi"
 
     return f"""
 {platform_intro}
@@ -55,9 +55,9 @@ XONALAR VA NARXLAR:
 SOATLIK IJARAGA Olish: 200.000 - 250.000 so'm
 
 AFZALLIKLAR:
-✅ Maxfiylik kafolatlanadi | ✅ ZAGS talab qilinmaydi
-✅ 1 pasport evaziga | ✅ Spa salon | ✅ Lounge bar
-✅ SMART TV | ✅ Wi-Fi | ✅ Konditsioner
+вњ… Maxfiylik kafolatlanadi | вњ… ZAGS talab qilinmaydi
+вњ… 1 pasport evaziga | вњ… Spa salon | вњ… Lounge bar
+вњ… SMART TV | вњ… Wi-Fi | вњ… Konditsioner
 
 BRON QILISHDA QUYIDAGI TARTIBDA MALUMOT SO'RANG:
 1. Avval ism so'rang
@@ -72,22 +72,22 @@ AGAR "BO'SH XONA" DEB SO'RASA:
 - Sanalar berilsa, mavjud xonalarni ayting
 
 AGAR MALUMOT TO'LIQ BO'LSA:
-✅ Qabul qiling va quyidagi xabarni yuboring:
+вњ… Qabul qiling va quyidagi xabarni yuboring:
 
-"✅ <b>Broningiz qabul qilindi!</b>
+"вњ… <b>Broningiz qabul qilindi!</b>
 
-🏨 Xona: [xona nomi]
-📅 Kelish: [sana]
-📅 Ketish: [sana]
-👥 [kishi soni] kishi
-💰 Jami: [narxi] so'm
+рџЏЁ Xona: [xona nomi]
+рџ"… Kelish: [sana]
+рџ"… Ketish: [sana]
+рџ'Ґ [kishi soni] kishi
+рџ'° Jami: [narxi] so'm
 
-👤 [ism]
-📞 [telefon]
+рџ'¤ [ism]
+рџ"ћ [telefon]
 
-━━━━━━━━━━━━━━━━━━━━━━
-✅ Bronni tasdiqlash uchun: <b>Tasdiqlayman</b>
-❌ Rad etish uchun: <b>Rad etaman</b> deb yozing."
+в"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓ
+вњ… Bronni tasdiqlash uchun: <b>Tasdiqlayman</b>
+вќЊ Rad etish uchun: <b>Rad etaman</b> deb yozing."
 
 AGAR MALUMOT TO'LIQ EMAS BO'LSA:
 - Qaysi malumot yo'q ekanini aniq ayting
@@ -121,16 +121,16 @@ def extract_booking_info(text: str) -> dict | None:
     room_choice_index = None
     
     name_patterns = [
-        r'ism(?:i|im|lar|larim)?[:\s]+([a-zA-Zа-яА-ЯёЁ\s]+?)(?:,|\.|$)',
-        r'ism\s*[:\-]?\s*([a-zA-Zа-яА-ЯёЁ\s]+?)(?:,|\n|$)',
+        r'ism(?:i|im|lar|larim)?[:\s]+([a-zA-Z\s]+?)(?:,|\.|$)',
+        r'ism\s*[:\-]?\s*([a-zA-Z\s]+?)(?:,|\n|$)',
         r'name\s*[:\-]?\s*([a-zA-Z\s]+?)(?:,|\n|$)',
-        r'^([a-zA-Zа-яА-ЯёЁ]{3,20})\s*(?:,|\.| Mening)',
+        r'^([a-zA-Z]{3,20})\s*(?:,|\.| Mening)',
     ]
     for pattern in name_patterns:
         name_match = re.search(pattern, text, re.IGNORECASE)
         if name_match:
             name = name_match.group(1).strip().title()
-            name = re.sub(r'[^a-zA-Zа-яА-ЯёЁ\s]', '', name)
+            name = re.sub(r'[^a-zA-Z\s]', '', name)
             if len(name) > 2:
                 break
 
@@ -288,14 +288,14 @@ async def get_ai_response(
         for phrase in [
             "salom",
             "assalomu alaykum",
-            "ассалому алайкум",
+            "Р°СЃСЃР°Р»РѕРјСѓ Р°Р»Р°Р№РєСѓРј",
             "hello",
             "hi",
         ]
     ):
         BOOKING_DRAFT.pop(user_id, None)
         BOOKING_STORE.pop(user_id, None)
-        reply = "Salom! Sizga qaysi xona kerak? (masalan: Standart, Deluxe, Suite yoki royxatdagi raqam bilan)"
+        reply = "Salom! Sizga qaysi xona kerak bo\x27ladi? (masalan: Standart, Deluxe, Suite yoki ro'yxatdagi raqam bilan)"
         push_message(user_id, "assistant", reply)
         await log_message(user_id, "incoming", user_message, reply)
         return reply
@@ -344,16 +344,16 @@ async def get_ai_response(
     ):
         rooms = await get_rooms(only_active=True)
         if rooms:
-            lines = ["Quyidagi xonalar mavjud:"]
+            lines = ["Marhamat, hozirda quyidagi xonalar mavjud:"]
             for idx, room in enumerate(rooms, start=1):
                 price = f"{room['price']:,}".replace(",", " ")
                 lines.append(
                     f"{idx}. {room['name']}: {price} so'm/kun | {room.get('description', '')} | {room.get('capacity', 1)} kishi | {room.get('quantity', 1)} ta"
                 )
-            lines.append("Qaysi xonani tanlaysiz? (nom yoki raqam)")
+            lines.append("Qaysi xonani tanlaysiz? (nom yoki raqam bilan yozsangiz bo'ladi)")
             reply = "\n".join(lines)
         else:
-            reply = "Hozircha faol xonalar yo'q."
+            reply = "Hozircha faol xonalar yo'q. Agar xohlasangiz, kelish sanasini yozing - mavjudlikni tekshirib beraman."
         push_message(user_id, "assistant", reply)
         await log_message(user_id, "incoming", user_message, reply)
         return reply
@@ -361,7 +361,7 @@ async def get_ai_response(
 
     # "bo'sh xona" so'rovida sanalarni talab qilish
     if ("bo'sh xona" in text_lower) and not booking_info:
-        reply = "Bo'sh xonalarni tekshirish uchun kelish va ketish sanalarini yozing. Masalan: 2026-04-10 2026-04-12"
+        reply = "Albatta, bo'sh xonalarni tekshirib beraman. Kelish va ketish sanalarini yozing. Masalan: 2026-04-10 2026-04-12"
         push_message(user_id, "assistant", reply)
         await log_message(user_id, "incoming", user_message, reply)
         return reply
@@ -410,10 +410,10 @@ async def get_ai_response(
                             lines.append(
                                 f"{idx}. {room.get('name')} - {price} so'm/kun | {room.get('capacity', 1)} kishi | {available_count} ta"
                             )
-                        lines.append("Qaysi xonani tanlaysiz? (nom yoki raqam)")
+                        lines.append("Qaysi xonani tanlaysiz? (nom yoki raqam bilan yozsangiz bo'ladi)")
                         reply = "\n".join(lines)
                     else:
-                        reply = "Qaysi xona kerak? (masalan: Standart, Deluxe, Suite yoki royxatdagi raqam bilan)"
+                        reply = "Qaysi xona kerak bo'ladi? (masalan: Standart, Deluxe, Suite yoki ro'yxatdagi raqam bilan)"
                     push_message(user_id, "assistant", reply)
                     await log_message(user_id, "incoming", user_message, reply)
                     return reply
@@ -423,7 +423,7 @@ async def get_ai_response(
                     draft.pop("availability_needed", None)
                     draft.pop("available_rooms", None)
                     BOOKING_DRAFT[user_id] = draft
-                    reply = "Kelish sanasini yuboring (YYYY-MM-DD)."
+                    reply = "Kelish sanasini yuboring, iltimos (YYYY-MM-DD)."
                     push_message(user_id, "assistant", reply)
                     await log_message(user_id, "incoming", user_message, reply)
                     return reply
@@ -488,32 +488,32 @@ async def get_ai_response(
                 BOOKING_DRAFT[user_id] = draft
                 missing = _next_missing_field(draft)
         if missing == "name":
-            reply = "Iltimos, ismingizni yozing."
+            reply = "Yordam berishim uchun ismingizni yozib yuboring, iltimos."
             push_message(user_id, "assistant", reply)
             await log_message(user_id, "incoming", user_message, reply)
             return reply
         if missing == "room":
-            reply = "Qaysi xona kerak? (masalan: Standart, Deluxe, Suite yoki royxatdagi raqam bilan)"
+            reply = "Qaysi xona kerak bo'ladi? (masalan: Standart, Deluxe, Suite yoki ro'yxatdagi raqam bilan)"
             push_message(user_id, "assistant", reply)
             await log_message(user_id, "incoming", user_message, reply)
             return reply
         if missing == "check_in":
-            reply = "Kelish sanasini yuboring (YYYY-MM-DD)."
+            reply = "Kelish sanasini yuboring, iltimos (YYYY-MM-DD)."
             push_message(user_id, "assistant", reply)
             await log_message(user_id, "incoming", user_message, reply)
             return reply
         if missing == "check_out":
-            reply = "Ketish sanasini yuboring (YYYY-MM-DD)."
+            reply = "Ketish sanasini ham yuboring, iltimos (YYYY-MM-DD)."
             push_message(user_id, "assistant", reply)
             await log_message(user_id, "incoming", user_message, reply)
             return reply
         if missing == "guests":
-            reply = "Necha kishi boladi? (raqam)"
+            reply = "Necha kishi bo'ladi? (raqam bilan yozing)"
             push_message(user_id, "assistant", reply)
             await log_message(user_id, "incoming", user_message, reply)
             return reply
         if missing == "phone":
-            reply = "Telefon raqamingizni yuboring (+998901234567)."
+            reply = "Telefon raqamingizni yuboring, iltimos (+998901234567)."
             push_message(user_id, "assistant", reply)
             await log_message(user_id, "incoming", user_message, reply)
             return reply
@@ -589,13 +589,13 @@ async def get_ai_response(
                 reply = (
                     "Tanlangan xona bu sanalarda band. "
                     f"Mavjud xonalar: {room_names}. "
-                    "Boshqa sana yoki xona tanlaysizmi?"
+                    "Xohlasangiz boshqa sana yoki xona tanlaymiz."
                 )
                 draft["availability_needed"] = True
                 draft["available_rooms"] = available_rooms
                 BOOKING_DRAFT[user_id] = draft
             else:
-                reply = "Afsus, bu sanalarda bo'sh xona yo'q. Boshqa sana aytasizmi?"
+                reply = "Afsus, bu sanalarda bo'sh xona yo'q. Boshqa sana aytsangiz, tekshirib beraman."
                 draft["availability_needed"] = True
                 draft["available_rooms"] = []
                 BOOKING_DRAFT[user_id] = draft
@@ -687,8 +687,8 @@ Rad etish uchun: <b>Rad etaman</b> deb yozing."""
         hotel = await get_hotel()
         reply = f"""Kechirasiz, texnik muammo yuz berdi.
 
-📞 Telefon: {hotel.get('phone', '+998773397171')}
-💬 Telegram: @Marcopolohotel_1"""
+рџ"ћ Telefon: {hotel.get('phone', '+998773397171')}
+рџ'¬ Telegram: @Marcopolohotel_1"""
 
     push_message(user_id, "assistant", reply)
     await log_message(user_id, "incoming", user_message, reply)
@@ -703,10 +703,10 @@ async def generate_post(topic: str, hotel_name: str) -> str:
 Marco Polo Hotel uchun Telegram post yozing:
 Mavzu: {topic}
 Format:
-📌 Sarlavha
+рџ"Њ Sarlavha
 Matn (3-5 jumla)
 Narxlar albatta
-📞 {hotel.get('phone', '+998773397171')} | {hotel.get('telegram', '@Marcopolohotel_1')}
+рџ"ћ {hotel.get('phone', '+998773397171')} | {hotel.get('telegram', '@Marcopolohotel_1')}
 """
     try:
         response = await client.chat.completions.create(
@@ -725,22 +725,22 @@ async def generate_booking_confirmation(order_data: dict) -> str:
     price_fmt = f"{order_data['total_price']:,}".replace(",", " ")
     
     return f"""
-✅ BUYURTMA QABUL QILINDI!
+вњ… BUYURTMA QABUL QILINDI!
 
-━━━━━━━━━━━━━━━━━━━━━━━━
-🏨 Xona: {order_data['room_name']}
-📅 Kelish: {order_data['check_in']}
-📅 Ketish: {order_data['check_out']}
-👥 Mehmonlar: {order_data['guests']} kishi
-💰 Jami: {price_fmt} so'm
+в"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓ
+рџЏЁ Xona: {order_data['room_name']}
+рџ"… Kelish: {order_data['check_in']}
+рџ"… Ketish: {order_data['check_out']}
+рџ'Ґ Mehmonlar: {order_data['guests']} kishi
+рџ'° Jami: {price_fmt} so'm
 
-👤 Ism: {order_data['name']}
-📞 Telefon: {order_data['phone']}
-━━━━━━━━━━━━━━━━━━━━━━━━
+рџ'¤ Ism: {order_data['name']}
+рџ"ћ Telefon: {order_data['phone']}
+в"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓ
 
-⏳ Operator tez orada siz bilan bog'lanadi!
+вЏі Operator tez orada siz bilan bog'lanadi!
 
-📞 {hotel.get('phone', '+998773397171')}
+рџ"ћ {hotel.get('phone', '+998773397171')}
 """
 
 
@@ -750,29 +750,29 @@ async def send_order_to_admins(bot, order_data: dict, admin_ids: list):
     
     hotel_address = hotel.get('address', "Do'mbirobod Naqqoshlik 121A")
     message = f"""
-🔔 <b>YANGI BRON!</b>
+рџ"" <b>YANGI BRON!</b>
 
-━━━━━━━━━━━━━━━━━━━━━━━━
-🏨 Xona: <b>{order_data['room_name']}</b>
-📅 {order_data['check_in']} → {order_data['check_out']}
-👥 {order_data['guests']} kishi
-💰 <b>{price_fmt} so'm</b>
+в"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓ
+рџЏЁ Xona: <b>{order_data['room_name']}</b>
+рџ"… {order_data['check_in']} в†' {order_data['check_out']}
+рџ'Ґ {order_data['guests']} kishi
+рџ'° <b>{price_fmt} so'm</b>
 
-👤 {order_data['name']}
-📞 {order_data['phone']}
-━━━━━━━━━━━━━━━━━━━━━━━━
-📍 Manzil: {hotel_address}
+рџ'¤ {order_data['name']}
+рџ"ћ {order_data['phone']}
+в"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓв"Ѓ
+рџ"Ќ Manzil: {hotel_address}
 """
     
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     
     phone_clean = order_data.get('phone', '').replace('tel:', '').strip()
     keyboard_buttons = [
-        [InlineKeyboardButton(text="✅ Tasdiqlash", callback_data=f"order_confirm_{order_data['id']}"),
-         InlineKeyboardButton(text="❌ Bekor", callback_data=f"order_cancel_{order_data['id']}")]
+        [InlineKeyboardButton(text="вњ… Tasdiqlash", callback_data=f"order_confirm_{order_data['id']}"),
+         InlineKeyboardButton(text="вќЊ Bekor", callback_data=f"order_cancel_{order_data['id']}")]
     ]
     if phone_clean and phone_clean.startswith('+'):
-        keyboard_buttons.append([InlineKeyboardButton(text="📞 Qo'ng'iroq", url=f"tel:{phone_clean}")])
+        keyboard_buttons.append([InlineKeyboardButton(text="Qo'ng'iroq", url=f"tel:{phone_clean}")])
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
     
@@ -782,11 +782,12 @@ async def send_order_to_admins(bot, order_data: dict, admin_ids: list):
         except:
             pass
 
-    # Also send to orders group
-    try:
-        await bot.send_message(-1003786827758, message)
-    except:
-        pass
+    # Also send to orders group if enabled
+    if os.getenv("ORDERS_GROUP_ID"):
+        try:
+            await bot.send_message(int(os.getenv("ORDERS_GROUP_ID")), message)
+        except:
+            pass
 
 
 def get_booking_data(user_id: str) -> dict | None:
@@ -795,3 +796,7 @@ def get_booking_data(user_id: str) -> dict | None:
 
 def clear_booking_data(user_id: str):
     BOOKING_STORE.pop(str(user_id), None)
+
+
+
+

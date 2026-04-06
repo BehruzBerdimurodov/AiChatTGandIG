@@ -164,7 +164,9 @@ async def _confirm_booking(user_id: str, platform: str) -> Optional[str]:
 ????????????????????"""
                 for admin_id in admins:
                     await bot_local.send_message(int(admin_id), notify_text)
-                await bot_local.send_message(-1003786827758, notify_text)
+                group_id = os.getenv("ORDERS_GROUP_ID")
+                if group_id:
+                    await bot_local.send_message(int(group_id), notify_text)
                 log.info(f"[{platform.upper()}] Admin notified: {len(admins)} admins")
             except Exception as e:
                 log.error(f"[{platform.upper()}] Admin notification error: {e}")
