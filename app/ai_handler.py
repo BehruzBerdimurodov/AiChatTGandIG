@@ -248,6 +248,38 @@ def _next_missing_field(draft: dict) -> str | None:
     return None
 
 
+def _missing_question(missing: str) -> str:
+    if missing == "name":
+        return "Yordam berishim uchun ismingizni yozib yuboring, iltimos."
+    if missing == "room":
+        return "Qaysi xona kerak bo'ladi? (masalan: Standart, Deluxe, Suite yoki ro'yxatdagi raqam bilan)"
+    if missing == "check_in":
+        return "Kelish sanasini yuboring, iltimos (YYYY-MM-DD)."
+    if missing == "check_out":
+        return "Ketish sanasini ham yuboring, iltimos (YYYY-MM-DD)."
+    if missing == "guests":
+        return "Necha kishi bo'ladi? (raqam bilan yozing)"
+    if missing == "phone":
+        return "Telefon raqamingizni yuboring, iltimos (+998901234567)."
+    return ""
+
+
+async def _faq_reply(text_lower: str) -> str | None:
+    hotel = await get_hotel()
+    address = hotel.get("address", "Do'mbirobod Naqqoshlik 121A")
+    phone = hotel.get("phone", "+998773397171")
+
+    if any(k in text_lower for k in ["manzil", "lokats", "location", "geopozits", "geolokats", "loc"]):
+        return f"Manzil: {address}. Xohlasangiz lokatsiya yuborib ham beraman."
+    if any(k in text_lower for k in ["telefon", "raqam", "aloqa"]):
+        return f"Aloqa uchun telefon: {phone}."
+    if any(k in text_lower for k in ["pasport", "passport", "zags", "nikoh"]):
+        return "Bir pasport yetarli. ZAGS talab qilinmaydi."
+    if any(k in text_lower for k in ["soatlik", "soatga", "saatlik"]):
+        return "Soatlik ijara: 200 000 - 250 000 so'm. Kelishuv asosida."
+    return None
+
+
 def get_history(user_id: str) -> list:
     return list(_store.get(str(user_id), []))
 
@@ -453,6 +485,14 @@ async def get_ai_response(
 
         missing = _next_missing_field(draft)
 
+        faq = await _faq_reply(text_lower)
+        if faq:
+            follow = _missing_question(missing) if missing else ""
+            reply = f"{faq}\n\n{follow}".strip()
+            push_message(user_id, "assistant", reply)
+            await log_message(user_id, "incoming", user_message, reply)
+            return reply
+
         # If we are waiting for guests, accept "2" or "2 kishi" forms
         if missing == "guests":
             text_norm = user_message.strip().lower()
@@ -488,32 +528,32 @@ async def get_ai_response(
                 BOOKING_DRAFT[user_id] = draft
                 missing = _next_missing_field(draft)
         if missing == "name":
-            reply = "Yordam berishim uchun ismingizni yozib yuboring, iltimos."
+            reply = _missing_question("name")
             push_message(user_id, "assistant", reply)
             await log_message(user_id, "incoming", user_message, reply)
             return reply
         if missing == "room":
-            reply = "Qaysi xona kerak bo'ladi? (masalan: Standart, Deluxe, Suite yoki ro'yxatdagi raqam bilan)"
+            reply = _missing_question("room")
             push_message(user_id, "assistant", reply)
             await log_message(user_id, "incoming", user_message, reply)
             return reply
         if missing == "check_in":
-            reply = "Kelish sanasini yuboring, iltimos (YYYY-MM-DD)."
+            reply = _missing_question("check_in")
             push_message(user_id, "assistant", reply)
             await log_message(user_id, "incoming", user_message, reply)
             return reply
         if missing == "check_out":
-            reply = "Ketish sanasini ham yuboring, iltimos (YYYY-MM-DD)."
+            reply = _missing_question("check_out")
             push_message(user_id, "assistant", reply)
             await log_message(user_id, "incoming", user_message, reply)
             return reply
         if missing == "guests":
-            reply = "Necha kishi bo'ladi? (raqam bilan yozing)"
+            reply = _missing_question("guests")
             push_message(user_id, "assistant", reply)
             await log_message(user_id, "incoming", user_message, reply)
             return reply
         if missing == "phone":
-            reply = "Telefon raqamingizni yuboring, iltimos (+998901234567)."
+            reply = _missing_question("phone")
             push_message(user_id, "assistant", reply)
             await log_message(user_id, "incoming", user_message, reply)
             return reply
