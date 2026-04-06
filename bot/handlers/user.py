@@ -396,73 +396,9 @@ async def handle_all_messages(message: Message, bot: Bot):
         )
         return
     
-    if text_lower in ['tasdiqlayman', 'tasdiq', 'ha', 'buyurtma tasdiqlayman', 'bron tasdiqlayman']:
-        ai_data = get_booking_data(f"tg_{user_id}")
-        if ai_data:
-            order_id = f"ORD-{datetime.now().strftime('%Y%m%d%H%M%S')}"
-            
-            order_data = {
-                'id': order_id,
-                'user_id': user_id,
-                'room_id': ai_data.get('room_id', 'unknown'),
-                'room_name': ai_data.get('room_name', 'Xona'),
-                'check_in': ai_data.get('check_in', ''),
-                'check_out': ai_data.get('check_out', ''),
-                'guests': ai_data.get('guests', 1),
-                'total_price': ai_data.get('total_price', 0),
-                'name': ai_data.get('name', ''),
-                'phone': ai_data.get('phone', ''),
-                'notes': '',
-                'source': 'telegram'
-            }
-            
-            from config.database import create_order, get_admins
-            try:
-                await create_order(order_data)
-                await log_activity(user_id, "booking_confirmed", f"Order: {order_id}")
-                print(f"[CONFIRM TEXT] Order saved: {order_id}")
-            except Exception as e:
-                log.error(f"Order error: {e}")
-            
-            admins = await get_admins()
-            super_admin = os.getenv("SUPER_ADMIN_ID", "")
-            admin_ids = _collect_admin_ids(admins, super_admin)
-
-            from app.ai_handler import send_order_to_admins
-            if admin_ids:
-                try:
-                    await send_order_to_admins(bot, order_data, admin_ids)
-                except Exception as e:
-                    log.error(f"Admin notify error: {e}")
-            
-            clear_booking_data(f"tg_{user_id}")
-            
-            await message.answer(
-                f"✅ <b>Broningiz tasdiqlandi!</b>\n\n"
-                f"🏨 {ai_data.get('room_name')}\n"
-                f"📅 {ai_data.get('check_in')} → {ai_data.get('check_out')}\n"
-                f"👥 {ai_data.get('guests')} kishi\n"
-                f"💰 <b>{format_price(ai_data.get('total_price', 0))} so'm</b>\n\n"
-                f"👤 {ai_data.get('name')}\n"
-                f"📞 {ai_data.get('phone')}\n\n"
-                f"⏳ Tez orada operator siz bilan bog'lanadi!",
-                reply_markup=main_kb(user.id)
-            )
-            return
-        
-        await message.answer("Sizda tasdiqlanishi kerak bo'lgan bron yo'q.", reply_markup=main_kb(user.id))
-        return
-    
-    if text_lower in ['bekor', 'yoq', 'cancel', 'bekor qilish']:
-        ai_data = get_booking_data(f"tg_{user_id}")
-        if ai_data:
-            clear_booking_data(f"tg_{user_id}")
-            if user_id in booking_store:
-                del booking_store[user_id]
-            await message.answer("❌ Bron bekor qilindi.", reply_markup=main_kb(user.id))
-            return
-    
+    # Inline button orqali bron jarayoni (booking_store)
     if user_id in booking_store:
+
         step = booking_store[user_id]['step']
         text = message.text.strip()
         
@@ -535,13 +471,22 @@ async def handle_all_messages(message: Message, bot: Bot):
                 reply_markup=keyboard
             )
         return
-    
+
+    # ─── AI orqali javob ───────────────────────────────────────────────────
     ai_data = get_booking_data(f"tg_{user_id}")
-    text_lower = message.text.strip().lower()
-    
-    if ai_data and text_lower in ['tasdiqlayman', 'tasdiq', 'ha', 'buyurtma tasdiqlayman', 'bron tasdiqlayman']:
+    text_norm = message.text.strip().lower()
+
+    CONFIRM_WORDS = {
+        'tasdiqlayman', 'tasdiq', 'ha', 'buyurtma tasdiqlayman',
+        'bron tasdiqlayman', 'tasdiql', 'confirm'
+    }
+    CANCEL_WORDS = {
+        'bekor', "yo'q", 'yoq', 'cancel', 'bekor qilish', 'rad etaman'
+    }
+
+    # Bron tasdiqlash kutilmoqda va user Tasdiqlayman yozdi
+    if ai_data and text_norm in CONFIRM_WORDS:
         order_id = f"ORD-{datetime.now().strftime('%Y%m%d%H%M%S')}"
-        
         order_data = {
             'id': order_id,
             'user_id': user_id,
@@ -556,28 +501,24 @@ async def handle_all_messages(message: Message, bot: Bot):
             'notes': '',
             'source': 'telegram'
         }
-        
         from config.database import create_order, get_admins
         try:
             await create_order(order_data)
             await log_activity(user_id, "booking_confirmed", f"Order: {order_id}")
-            print(f"[CONFIRM TEXT] Order saved: {order_id}")
         except Exception as e:
             log.error(f"Order error: {e}")
-        
+
         admins = await get_admins()
         super_admin = os.getenv("SUPER_ADMIN_ID", "")
         admin_ids = _collect_admin_ids(admins, super_admin)
-
         from app.ai_handler import send_order_to_admins
         if admin_ids:
             try:
                 await send_order_to_admins(bot, order_data, admin_ids)
             except Exception as e:
                 log.error(f"Admin notify error: {e}")
-        
+
         clear_booking_data(f"tg_{user_id}")
-        
         await message.answer(
             f"✅ <b>Broningiz tasdiqlandi!</b>\n\n"
             f"🏨 {ai_data.get('room_name')}\n"
@@ -590,38 +531,35 @@ async def handle_all_messages(message: Message, bot: Bot):
             reply_markup=main_kb(user.id)
         )
         return
-    
-    if ai_data and text_lower in ['bekor', 'yoq', 'cancel', 'bekor qilish']:
+
+    # Bron bekor qilish
+    if ai_data and text_norm in CANCEL_WORDS:
         clear_booking_data(f"tg_{user_id}")
         if user_id in booking_store:
             del booking_store[user_id]
         await message.answer("❌ Bron bekor qilindi.", reply_markup=main_kb(user.id))
         return
-    
-    if ai_data:
-        await message.answer(
-            f"📋 <b>Bron ma'lumotlari:</b>\n\n"
-            f"🏨 Xona: <b>{ai_data['room_name']}</b>\n"
-            f"📅 {ai_data['check_in']} → {ai_data['check_out']}\n"
-            f"👥 {ai_data['guests']} kishi\n"
-            f"💰 <b>{format_price(ai_data['total_price'])} so'm</b>\n\n"
-            f"👤 {ai_data['name']}\n"
-            f"📞 {ai_data['phone']}\n\n"
-            f"✅ Tasdiqlash uchun 'tasdiqlayman' deb yozing\n"
-            f"❌ Bekor qilish uchun 'bekor' deb yozing."
-        )
-        return
-    
+
+    # Barcha boshqa xabarlar — AI ga yuborish
     await bot.send_chat_action(message.chat.id, ChatAction.TYPING)
-    
+
     reply = await get_ai_response(
         user_id=f"tg_{user.id}",
         user_message=message.text,
         user_name=user.first_name or "Mehmon",
         platform="telegram"
     )
-    
-    if "Broningiz qabul qilindi" in reply or "tasdiqlayman" in reply:
+
+    # Agar bron tayyor bo'lsa eslatma qo'shmaymiz (AI allaqachon yozgan)
+    if ai_data and "Broningiz qabul" not in reply:
+        reminder = (
+            f"\n\n──────────────────────\n"
+            f"📋 <b>Eslatma:</b> Tasdiqlanmagan broningiz bor!\n"
+            f"✅ <b>Tasdiqlayman</b> yoki ❌ <b>Bekor</b> deb yozing."
+        )
+        reply = reply + reminder
+
+    if "Broningiz qabul qilindi" in reply or "Tasdiqlayman" in reply:
         await message.answer(reply)
     else:
         await message.answer(reply, reply_markup=main_kb(user.id))
