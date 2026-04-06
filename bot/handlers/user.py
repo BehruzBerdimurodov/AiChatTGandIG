@@ -135,6 +135,15 @@ async def cmd_start(message: Message, bot: Bot, state: FSMContext):
     has_name = bool(existing and (existing.get("first_name") or existing.get("last_name")))
 
     if not has_phone or not has_name:
+        if has_name and not has_phone:
+            await state.set_state(OnboardState.contact)
+            kb = ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="Kontakt yuborish", request_contact=True)]],
+                resize_keyboard=True,
+                one_time_keyboard=True
+            )
+            await message.answer("Telefon raqamingizni yuboring:", reply_markup=kb)
+            return
         await state.set_state(OnboardState.name)
         await message.answer(
             """Assalomu alaykum! Iltimos, ism va familiyangizni yozing.
@@ -182,6 +191,14 @@ async def onboard_name(message: Message, state: FSMContext):
     first_name = parts[0]
     last_name = " ".join(parts[1:]) if len(parts) > 1 else ""
 
+    await register_user(
+        user_id=str(message.from_user.id),
+        user_type="telegram",
+        first_name=first_name,
+        last_name=last_name,
+        username=message.from_user.username or "",
+        phone=""
+    )
     await state.update_data(first_name=first_name, last_name=last_name)
     await state.set_state(OnboardState.contact)
 
