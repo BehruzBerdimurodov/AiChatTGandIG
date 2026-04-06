@@ -87,9 +87,11 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    # Diqqat: Production (Railway/Render) muhitida o'chayotganda Webhook ni uzib ketish (delete_webhook) mumkin emas. 
+    # Aks holda u yangi ishga tushgan server webhook ini ham uzib yuboradi.
     if bot:
         try:
-            await bot.delete_webhook(drop_pending_updates=True)
+            await bot.session.close()
         except Exception:
             pass
 
