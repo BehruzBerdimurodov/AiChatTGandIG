@@ -125,6 +125,66 @@ class InstagramDM(BaseModel):
     timestamp: Optional[str] = ""
 
 
+
+async def _confirm_booking(user_id: str, platform: str) -> Optional[str]:
+    if user_id not in BOOKING_STORE:
+        return None
+
+    booking_data = BOOKING_STORE[user_id]
+    order_id = f"ORD-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+
+    booking_data["id"] = order_id
+    booking_data["source"] = platform
+
+    try:
+        await create_order(booking_data)
+        await log_activity(user_id, "booking_confirmed", f"Order: {order_id}")
+        log.info(f"[{platform.upper()} BOOKING] Saved: {order_id} - {booking_data.get('room_name')}")
+        del BOOKING_STORE[user_id]
+
+        admins = await get_admins()
+        super_admin = os.getenv("SUPER_ADMIN_ID")
+        if super_admin:
+            admins.extend([x.strip() for x in super_admin.split(',')])
+
+        if admins:
+            try:
+                bot_local = Bot(token=os.getenv("TELEGRAM_BOT_TOKEN"))
+                notify_text = f"""?? <b>{platform.upper()}DAN YANGI BRON!</b>
+
+????????????????????
+?? Xona: <b>{booking_data.get('room_name')}</b>
+?? {booking_data.get('check_in')} > {booking_data.get('check_out')}
+?? {booking_data.get('guests')} kishi
+?? <b>{booking_data.get('total_price'):,} so'm</b>
+
+?? {booking_data.get('name')}
+?? {booking_data.get('phone')}
+?? Platform: {platform.title()}
+????????????????????"""
+                for admin_id in admins:
+                    await bot_local.send_message(int(admin_id), notify_text)
+                await bot_local.send_message(-1003786827758, notify_text)
+                log.info(f"[{platform.upper()}] Admin notified: {len(admins)} admins")
+            except Exception as e:
+                log.error(f"[{platform.upper()}] Admin notification error: {e}")
+
+        reply = f"""? <b>Broningiz tasdiqlandi!</b>
+
+?? Xona: {booking_data.get('room_name')}
+?? Kelish: {booking_data.get('check_in')}
+?? Ketish: {booking_data.get('check_out')}
+?? {booking_data.get('guests')} kishi
+?? Jami: {booking_data.get('total_price'):,} so'm
+
+?? {booking_data.get('name')}
+?? {booking_data.get('phone')}
+
+Tez orada operator siz bilan bog'lanadi!"""
+        return reply
+    except Exception as e:
+        log.error(f"[{platform.upper()} BOOKING] Save error: {e}")
+        return "? Xatolik yuz berdi. Keyinroq qayta urinib ko'ring."
 @app.post("/webhook/telegram")
 async def telegram_webhook(
     request: Request,
@@ -188,254 +248,50 @@ async def health():
 async def manychat_webhook(payload: ManyChatPayload):
     """Instagram ManyChat webhook"""
     user_id = f"ig_{payload.user_id}"
-    message = payload.message.strip().lower()
-    
+    message_raw = payload.message.strip()
+    message = message_raw.lower()
+
     log.info(f"[Instagram] {payload.user_id}: {payload.message[:60]}")
-    
+
     await register_user(
         user_id=user_id,
         user_type="instagram",
         first_name=payload.first_name or "Mehmon"
     )
-    
+
     if user_id in BOOKING_STORE and message in ['tasdiqlayman', 'tasdiq', 'ha', 'buyurtma tasdiqlayman', 'bron tasdiqlayman']:
-        booking_data = BOOKING_STORE[user_id]
-        order_id = f"ORD-{datetime.now().strftime('%Y%m%d%H%M%S')}"
-        
-        booking_data['id'] = order_id
-        booking_data['source'] = 'instagram'
-        
-        try:
-            await create_order(booking_data)
-            await log_activity(user_id, "booking_confirmed", f"Order: {order_id}")
-            log.info(f"[INSTAGRAM BOOKING] Saved: {order_id} - {booking_data.get('room_name')}")
-            del BOOKING_STORE[user_id]
-            
-            from app.ai_handler import send_order_to_admins
-            admins = await get_admins()
-            super_admin = os.getenv("SUPER_ADMIN_ID")
-            if super_admin:
-                admins.extend([x.strip() for x in super_admin.split(',')])
-            
-            if admins:
-                try:
-                    from aiogram import Bot
-                    bot = Bot(token=os.getenv("TELEGRAM_BOT_TOKEN"))
-                    for admin_id in admins:
-                        await bot.send_message(
-                            int(admin_id),
-                            f"""🔔 <b>INSTAGRAMDAN YANGI BRON!</b>
+        reply = await _confirm_booking(user_id, "instagram")
+        return format_manychat_response(reply or "")
 
-━━━━━━━━━━━━━━━━━━━━━━━━
-🏨 Xona: <b>{booking_data.get('room_name')}</b>
-📅 {booking_data.get('check_in')} → {booking_data.get('check_out')}
-👥 {booking_data.get('guests')} kishi
-💰 <b>{booking_data.get('total_price'):,} so'm</b>
+    ai_response = await get_ai_response(user_id, message_raw, payload.first_name or "Mehmon", platform="instagram")
+    return format_manychat_response(ai_response)
 
-👤 {booking_data.get('name')}
-📞 {booking_data.get('phone')}
-📱 Platform: Instagram
-━━━━━━━━━━━━━━━━━━━━━━━━"""
-                        )
-                    await bot.send_message(
-                        -1003786827758,
-                        f"""рџ”” <b>INSTAGRAMDAN YANGI BRON!</b>
-
-в”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓ
-рџЏЁ Xona: <b>{booking_data.get('room_name')}</b>
-рџ“… {booking_data.get('check_in')} в†’ {booking_data.get('check_out')}
-рџ‘Ґ {booking_data.get('guests')} kishi
-рџ’° <b>{booking_data.get('total_price'):,} so'm</b>
-
-рџ‘¤ {booking_data.get('name')}
-рџ“ћ {booking_data.get('phone')}
-рџ“± Platform: Instagram
-в”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓв”Ѓ"""
-                    )
-                    log.info(f"[INSTAGRAM] Admin notified: {len(admins)} admins")
-                except Exception as e:
-                    log.error(f"[INSTAGRAM] Admin notification error: {e}")
-            
-            reply = f"""✅ <b>Broningiz tasdiqlandi!</b>
-
-🏨 Xona: {booking_data.get('room_name')}
-📅 Kelish: {booking_data.get('check_in')}
-📅 Ketish: {booking_data.get('check_out')}
-👥 {booking_data.get('guests')} kishi
-💰 Jami: {booking_data.get('total_price'):,} so'm
-
-👤 {booking_data.get('name')}
-📞 {booking_data.get('phone')}
-
-Tez orada operator siz bilan bog'lanadi!"""
-        except Exception as e:
-            log.error(f"[INSTAGRAM BOOKING ERROR] {e}")
-            reply = "❌ Xatolik yuz berdi. Iltimos, qayta urinib ko'ring."
-    elif user_id in BOOKING_STORE and message in ['bekor', 'yoq', 'cancel']:
-        del BOOKING_STORE[user_id]
-        reply = "❌ Bron bekor qilindi."
-    else:
-        reply = await get_ai_response(
-            user_id=user_id,
-            user_message=payload.message,
-            user_name=payload.first_name or "Mehmon",
-            platform="instagram"
-        )
-    
-    await log_activity(user_id, "instagram_dm", payload.message[:50])
-    
-    return JSONResponse(content=format_manychat_response(reply))
-
-
-@app.post("/webhook/make")
-async def make_webhook(payload: MakePayload):
-    """Make.com (Integromat) webhook"""
-    user_id = f"ig_make_{payload.user_id}"
-    message = payload.message.strip().lower()
-    
-    log.info(f"[Make.com Instagram] {payload.user_id}: {payload.message[:60]}")
-    
-    await register_user(
-        user_id=user_id,
-        user_type="instagram",
-        first_name=payload.first_name or "Mehmon"
-    )
-    
-    if user_id in BOOKING_STORE and message in ['tasdiqlayman', 'tasdiq', 'ha', 'buyurtma tasdiqlayman', 'bron tasdiqlayman']:
-        booking_data = BOOKING_STORE[user_id]
-        order_id = f"ORD-{datetime.now().strftime('%Y%m%d%H%M%S')}"
-        
-        booking_data['id'] = order_id
-        booking_data['source'] = 'instagram'
-        
-        try:
-            await create_order(booking_data)
-            await log_activity(user_id, "booking_confirmed", f"Order: {order_id}")
-            del BOOKING_STORE[user_id]
-            
-            from app.ai_handler import send_order_to_admins
-            admins = await get_admins()
-            super_admin = os.getenv("SUPER_ADMIN_ID")
-            if super_admin:
-                admins.extend([x.strip() for x in super_admin.split(',')])
-            
-            if admins:
-                try:
-                    from aiogram import Bot
-                    bot = Bot(token=os.getenv("TELEGRAM_BOT_TOKEN"))
-                    for admin_id in admins:
-                        await bot.send_message(
-                            int(admin_id),
-                            f"""🔔 <b>INSTAGRAMDAN (MAKE) YANGI BRON!</b>\n\n🏨 Xona: <b>{booking_data.get('room_name')}</b>\n📅 {booking_data.get('check_in')} → {booking_data.get('check_out')}\n💰 <b>{booking_data.get('total_price'):,} so'm</b>\n👤 {booking_data.get('name')}\n📞 {booking_data.get('phone')}"""
-                        )
-                    await bot.send_message(
-                        -1003786827758,
-                        f"""рџ”” <b>INSTAGRAMDAN (MAKE) YANGI BRON!</b>
-
-рџЏЁ Xona: <b>{booking_data.get('room_name')}</b>
-рџ“… {booking_data.get('check_in')} в†’ {booking_data.get('check_out')}
-рџ’° <b>{booking_data.get('total_price'):,} so'm</b>
-рџ‘¤ {booking_data.get('name')}
-рџ“ћ {booking_data.get('phone')}"""
-                    )
-                except Exception as e:
-                    log.error(f"[MAKE] Admin notification error: {e}")
-            
-            reply = f"✅ Broningiz tasdiqlandi!\n🏨 Xona: {booking_data.get('room_name')}\n📅 Kelish: {booking_data.get('check_in')}\n📅 Ketish: {booking_data.get('check_out')}\n💰 Jami: {booking_data.get('total_price'):,} so'm\n\nTez orada aloqaga chiqamiz!"
-        except Exception as e:
-            log.error(f"[MAKE BOOKING ERROR] {e}")
-            reply = "❌ Xatolik yuz berdi. Iltimos, qayta urinib ko'ring."
-    elif user_id in BOOKING_STORE and message in ['bekor', 'yoq', 'cancel']:
-        del BOOKING_STORE[user_id]
-        reply = "❌ Bron bekor qilindi."
-    else:
-        reply = await get_ai_response(
-            user_id=user_id,
-            user_message=payload.message,
-            user_name=payload.first_name or "Mehmon",
-            platform="instagram"
-        )
-    
-    await log_activity(user_id, "make_dm", payload.message[:50])
-    return {"reply": reply}
 
 @app.post("/webhook/chatfuel")
-async def chatfuel_webhook(payload: ChatfuelPayload):
-    """Chatfuel JSON API webhook"""
-    user_id = f"ig_cf_{payload.chatfuel_user_id}"
-    message = payload.last_user_freeform_input.strip().lower()
-    
-    log.info(f"[Chatfuel Instagram] {payload.chatfuel_user_id}: {payload.last_user_freeform_input[:60]}")
-    
+async def chatfuel_webhook(request: Request):
+    payload = await request.json()
+    chatfuel_user_id = payload.get("chatfuel_user_id") or payload.get("user_id")
+    message_raw = payload.get("last_user_freeform_input") or payload.get("message") or ""
+    first_name = payload.get("first_name") or "Mehmon"
+
+    if not chatfuel_user_id or not message_raw:
+        return JSONResponse({"messages": [{"text": "Xatolik: user_id yoki message yo'q."}]})
+
+    user_id = f"ig_{chatfuel_user_id}"
+    msg_lower = message_raw.strip().lower()
+
     await register_user(
         user_id=user_id,
         user_type="instagram",
-        first_name=payload.first_name or "Mehmon"
+        first_name=first_name,
     )
-    
-    if user_id in BOOKING_STORE and message in ['tasdiqlayman', 'tasdiq', 'ha', 'buyurtma tasdiqlayman', 'bron tasdiqlayman']:
-        booking_data = BOOKING_STORE[user_id]
-        order_id = f"ORD-{datetime.now().strftime('%Y%m%d%H%M%S')}"
-        
-        booking_data['id'] = order_id
-        booking_data['source'] = 'instagram'
-        
-        try:
-            await create_order(booking_data)
-            await log_activity(user_id, "booking_confirmed", f"Order: {order_id}")
-            del BOOKING_STORE[user_id]
-            
-            from app.ai_handler import send_order_to_admins
-            admins = await get_admins()
-            super_admin = os.getenv("SUPER_ADMIN_ID")
-            if super_admin:
-                admins.extend([x.strip() for x in super_admin.split(',')])
-            
-            if admins:
-                try:
-                    from aiogram import Bot
-                    bot = Bot(token=os.getenv("TELEGRAM_BOT_TOKEN"))
-                    for admin_id in admins:
-                        await bot.send_message(
-                            int(admin_id),
-                            f"""🔔 <b>INSTAGRAMDAN (CHATFUEL) YANGI BRON!</b>\n\n🏨 Xona: <b>{booking_data.get('room_name')}</b>\n📅 {booking_data.get('check_in')} → {booking_data.get('check_out')}\n💰 <b>{booking_data.get('total_price'):,} so'm</b>\n👤 {booking_data.get('name')}\n📞 {booking_data.get('phone')}"""
-                        )
-                    await bot.send_message(
-                        -1003786827758,
-                        f"""рџ”” <b>INSTAGRAMDAN (CHATFUEL) YANGI BRON!</b>
 
-рџЏЁ Xona: <b>{booking_data.get('room_name')}</b>
-рџ“… {booking_data.get('check_in')} в†’ {booking_data.get('check_out')}
-рџ’° <b>{booking_data.get('total_price'):,} so'm</b>
-рџ‘¤ {booking_data.get('name')}
-рџ“ћ {booking_data.get('phone')}"""
-                    )
-                except Exception as e:
-                    log.error(f"[CHATFUEL] Admin notification error: {e}")
-            
-            reply = f"✅ Broningiz tasdiqlandi!\n🏨 Xona: {booking_data.get('room_name')}\n📅 Kelish: {booking_data.get('check_in')}\n📅 Ketish: {booking_data.get('check_out')}\n💰 Jami: {booking_data.get('total_price'):,} so'm\n\nTez orada aloqaga chiqamiz!"
-        except Exception as e:
-            log.error(f"[CHATFUEL BOOKING ERROR] {e}")
-            reply = "❌ Xatolik yuz berdi. Iltimos, qayta urinib ko'ring."
-    elif user_id in BOOKING_STORE and message in ['bekor', 'yoq', 'cancel']:
-        del BOOKING_STORE[user_id]
-        reply = "❌ Bron bekor qilindi."
-    else:
-        reply = await get_ai_response(
-            user_id=user_id,
-            user_message=payload.last_user_freeform_input,
-            user_name=payload.first_name or "Mehmon",
-            platform="instagram"
-        )
-    
-    await log_activity(user_id, "chatfuel_dm", payload.last_user_freeform_input[:50])
-    
-    # Chatfuel kutilgan maxsus JSON format:
-    return JSONResponse(content={
-        "messages": [
-            {"text": reply}
-        ]
-    })
+    if user_id in BOOKING_STORE and msg_lower in ['tasdiqlayman', 'tasdiq', 'ha', 'buyurtma tasdiqlayman', 'bron tasdiqlayman']:
+        reply = await _confirm_booking(user_id, "instagram")
+        return JSONResponse({"messages": [{"text": reply or ""}]})
+
+    ai_response = await get_ai_response(user_id, message_raw, first_name, platform="instagram")
+    return JSONResponse({"messages": [{"text": ai_response}]})
 
 
 @app.post("/webhook/instagram")
