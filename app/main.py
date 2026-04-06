@@ -10,6 +10,12 @@ from fastapi import FastAPI, Request, HTTPException, Header
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 from typing import Optional
+from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.fsm.storage.redis import RedisStorage
+from aiogram.types import Update
 
 from app.ai_handler import get_ai_response, active_users, send_order_to_admins, BOOKING_STORE
 from app.manychat import format_manychat_response
@@ -17,6 +23,7 @@ from config.database import (
     init_db, register_user, create_order, get_hotel, get_admins, log_activity, get_db, get_user_count, is_room_available
 )
 from datetime import datetime
+from bot.handlers import user as user_handlers, admin as admin_handlers
 
 log = logging.getLogger(__name__)
 
@@ -31,13 +38,60 @@ def require_internal_token(x_internal_token: str | None):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
+bot: Bot | None = None
+dp: Dispatcher | None = None
+
+
+def _build_dispatcher() -> Dispatcher:
+    redis_url = os.getenv("REDIS_URL")
+    if redis_url:
+        storage = RedisStorage.from_url(redis_url)
+        log.info("Redis orqali ulashilmoqda ✅")
+    else:
+        storage = MemoryStorage()
+        log.info("MemoryStorage orqali ulashilmoqda ⚠️ (Production uchun Redis tavsiya etiladi)")
+
+    dispatcher = Dispatcher(storage=storage)
+    dispatcher.include_router(admin_handlers.router)
+    dispatcher.include_router(user_handlers.router)
+    return dispatcher
+
+
+def _build_bot() -> Bot:
+    return Bot(
+        token=os.getenv("TELEGRAM_BOT_TOKEN"),
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global bot, dp
     await init_db()
     log.info("✅ Database initialized")
     log.info("✅ FastAPI server Marco Polo Hotel Bot ishga tushdi")
+
+    if os.getenv("TELEGRAM_BOT_TOKEN"):
+        bot = _build_bot()
+        dp = _build_dispatcher()
+
+        webhook_url = os.getenv("WEBHOOK_URL")
+        webhook_path = os.getenv("WEBHOOK_PATH", "/webhook/telegram")
+        webhook_secret = os.getenv("WEBHOOK_SECRET")
+        run_mode = os.getenv("RUN_MODE", "").lower()
+        if webhook_url or run_mode == "webhook":
+            full_url = webhook_url.rstrip("/") + webhook_path if webhook_url else None
+            if full_url:
+                await bot.set_webhook(full_url, secret_token=webhook_secret)
+                log.info(f"Telegram webhook set: {full_url}")
+
     yield
 
+    if bot:
+        try:
+            await bot.delete_webhook(drop_pending_updates=True)
+        except Exception:
+            pass
 
 app = FastAPI(
     title="Marco Polo Hotel Bot API",
@@ -69,6 +123,23 @@ class InstagramDM(BaseModel):
     sender_name: Optional[str] = "Mehmon"
     message: str
     timestamp: Optional[str] = ""
+
+
+@app.post("/webhook/telegram")
+async def telegram_webhook(
+    request: Request,
+    x_telegram_bot_api_secret_token: Optional[str] = Header(default=None),
+):
+    if not bot or not dp:
+        return Response(status_code=503)
+
+    webhook_secret = os.getenv("WEBHOOK_SECRET")
+    if webhook_secret and x_telegram_bot_api_secret_token != webhook_secret:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    update = Update.model_validate(await request.json())
+    await dp.feed_update(bot, update)
+    return Response(status_code=200)
 
 
 @app.get("/")

@@ -275,6 +275,8 @@ async def get_ai_response(
 
     booking_info = extract_booking_info(user_message)
     text_lower = user_message.lower().strip()
+    if "bosh xona" in text_lower:
+        text_lower = text_lower.replace("bosh xona", "bo'sh xona")
 
     # Greeting: clear any stale draft so it doesn't force date questions
     if not booking_info and any(
@@ -331,6 +333,9 @@ async def get_ai_response(
             "xona narx",
             "narxlari",
             "narxlar",
+            "tarif",
+            "tariflar",
+            "tariflari",
         ]
     ):
         rooms = await get_rooms(only_active=True)
@@ -351,7 +356,7 @@ async def get_ai_response(
     
 
     # "bo'sh xona" so'rovida sanalarni talab qilish
-    if "bo'sh xona" in text_lower and not booking_info:
+    if ("bo'sh xona" in text_lower) and not booking_info:
         reply = "Bo'sh xonalarni tekshirish uchun kelish va ketish sanalarini yozing. Masalan: 2026-04-10 2026-04-12"
         push_message(user_id, "assistant", reply)
         await log_message(user_id, "incoming", user_message, reply)

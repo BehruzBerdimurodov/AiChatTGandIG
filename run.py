@@ -82,8 +82,14 @@ async def main():
     log.info("✅ Database tayyor!")
 
     log.info("Hotel AI Chatbot v4 ishga tushmoqda... 🏨")
-    await asyncio.gather(run_bot(), run_api())
-
+    log.info("Hotel AI Chatbot v4 ishga tushmoqda... 🏨")
+    run_mode = os.getenv("RUN_MODE", "").lower()
+    webhook_url = os.getenv("WEBHOOK_URL")
+    if run_mode == "webhook" or webhook_url:
+        log.info("Webhook rejimi: faqat FastAPI server ishga tushadi.")
+        await run_api()
+    else:
+        await asyncio.gather(run_bot(), run_api())
 
 if __name__ == "__main__":
     logging.basicConfig(
