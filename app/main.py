@@ -75,7 +75,13 @@ async def lifespan(app: FastAPI):
         bot = _build_bot()
         dp = _build_dispatcher()
 
+        railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN")
         webhook_url = os.getenv("WEBHOOK_URL")
+        
+        # Railway muhitida bo'lsak va RAILWAY_PUBLIC_DOMAIN berilgan bo'lsa uni ustun qo'yamiz
+        if railway_domain:
+            webhook_url = f"https://{railway_domain}"
+
         webhook_path = os.getenv("WEBHOOK_PATH", "/webhook/telegram")
         webhook_secret = os.getenv("WEBHOOK_SECRET")
         run_mode = os.getenv("RUN_MODE", "").lower()
@@ -116,7 +122,7 @@ class MakePayload(BaseModel):
     first_name: Optional[str] = "Mehmon"
     message: str
 
-
+ 
 class ChatfuelPayload(BaseModel):
     chatfuel_user_id: str
     first_name: Optional[str] = "Mehmon"

@@ -290,10 +290,13 @@ def active_users() -> int:
     return len(_store)
 
 
-async def _ai_reply(user_id: str, user_message: str, platform: str = "telegram") -> str:
+async def _ai_reply(user_id: str, user_message: str, platform: str = "telegram", append_system_prompt: str = "") -> str:
     """OpenAI orqali javob olish"""
     history = get_history(user_id)
     system_prompt = await _build_system_prompt(platform)
+
+    if append_system_prompt:
+        system_prompt += f"\n\nMUHIM QO'SHIMCHA KO'RSATMA:\n{append_system_prompt}"
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -326,13 +329,14 @@ async def _handle_booking_flow(
     user_message: str,
     platform: str,
     booking_info: dict | None,
-) -> str | None:
+) -> str | dict | None:
     """
     Faqat foydalanuvchi bron qilmoqchi bo'lganda ishlaydigan funksiya.
     Agar bron jarayoni aktiv bo'lmasa va foydalanuvchi bron so'ramasa — None qaytaradi.
     """
     text_lower = user_message.lower().strip()
     draft = BOOKING_DRAFT.get(user_id, {})
+    draft_before = draft.copy()
 
     # Agar draft ACTIVE bo'lmasa va foydalanuvchi bron so'ramasa — chiqib ket
     if not draft and not _is_booking_intent(user_message):
@@ -446,8 +450,15 @@ async def _handle_booking_flow(
                         f"| {room.get('capacity', 1)} kishigacha"
                     )
                 lines.append("\nNom yoki raqam bilan yozing.")
-                return "\n".join(lines)
-        return _missing_question(missing)
+                missing_text = "\n".join(lines)
+            else:
+                missing_text = _missing_question(missing)
+        else:
+            missing_text = _missing_question(missing)
+            
+        if draft == draft_before:
+            return {"type": "ai_append", "text": missing_text, "missing_field": missing}
+        return missing_text
 
     # Barcha ma'lumot to'liq — xona topish
     rooms_all = await get_rooms(only_active=True)
@@ -626,6 +637,17 @@ async def get_ai_response(
     booking_reply = await _handle_booking_flow(
         user_id, user_message, platform, booking_info
     )
+
+    if isinstance(booking_reply, dict) and booking_reply.get("type") == "ai_append":
+        append_sys = (
+            f"Foydalanuvchi hozir bron qilish jarayonida (navbatdagi qadam: {booking_reply.get('missing_field')}), "
+            "lekin savol berdi yoki tushunarsiz javob yozdi. Zudlik bilan uning oxirgi xabariga to'liq javob berib, "
+            f"keyin oxirida albatta quyidagi ma'lumotni so'rab/ko'rsatib qo'y:\n\n{booking_reply['text']}"
+        )
+        reply = await _ai_reply(user_id, user_message, platform, append_sys)
+        push_message(user_id, "assistant", reply)
+        await log_message(user_id, "incoming", user_message, reply)
+        return reply
 
     if booking_reply is not None:
         push_message(user_id, "assistant", booking_reply)
