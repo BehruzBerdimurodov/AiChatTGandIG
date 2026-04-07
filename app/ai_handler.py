@@ -1,6 +1,6 @@
 """
-AI Handler - Professional AI yordamchi
-Marco Polo Hotel uchun - Barcha savolga javob beradi
+AI Handler - Marco Polo Hotel
+100% ishlaydigan bron jarayoni + AI chat
 """
 
 import os
@@ -10,57 +10,129 @@ import logging
 from datetime import datetime
 from openai import AsyncOpenAI
 from config.database import (
-    get_hotel, get_rooms, get_room, create_order,
+    get_hotel, get_rooms, create_order,
     log_message, log_activity, register_user,
     get_admins, find_available_rooms, get_user
 )
 
 log = logging.getLogger(__name__)
 
-# OpenAI Client (Lazy intialization)
 _client: AsyncOpenAI | None = None
 
 def get_openai_client() -> AsyncOpenAI:
     global _client
     if _client is None:
-        key = os.getenv("OPENAI_API_KEY")
-        if not key or key == "dummy_key_to_prevent_import_crash_during_startup" or key.strip() == "":
-            raise ValueError("OPENAI_API_KEY is missing or invalid! Please check environment variables.")
+        key = os.getenv("OPENAI_API_KEY", "")
+        if not key or "dummy" in key or not key.strip():
+            raise ValueError("OPENAI_API_KEY yo'q yoki noto'g'ri!")
         _client = AsyncOpenAI(api_key=key)
     return _client
 
 MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
-# Suhbat tarixi
+# Suhbat tarixi (xotirada)
 _store: dict[str, list[dict]] = {}
 MAX_HISTORY = 20
 
-# Bron jarayoni
+# Bron holatlari
 BOOKING_STORE: dict[str, dict] = {}   # Tasdiqlash kutayotganlar
-BOOKING_DRAFT: dict[str, dict] = {}   # Bron jarayonidagilar
+BOOKING_DRAFT: dict[str, dict] = {}   # To'ldirilayotgan bron
 
-TELEGRAM_BOT_LINK = "https://t.me/MarcoPoloHotelBot"
-
-# Bron so'rovini aniqlash uchun kalit so'zlar
 BOOKING_INTENT_KEYWORDS = [
     "xona kerak", "xona bron", "xona band", "bron qil", "band qil",
     "xona olmoqchi", "xona reserv", "reservatsiya", "booking",
-    "xona bos", "xona band qilmoqchi", "joy band", "joy kerak",
-    "qo'nmoqchi", "tunash", "tunamo", "tunab",
+    "joy band", "joy kerak", "qo'nmoqchi", "tunash",
     "bron qilmoqchi", "bron qilish", "band qilmoqchi",
-    "xona olish", "joy olish", "xona band olish",
+    "xona olish", "joy olish",
 ]
 
-# Bron BEKOR qilish uchun aniq so'zlar (faqat kuchli signal)
 BOOKING_CANCEL_KEYWORDS = [
     "bron bekor", "bekor qilish", "bron kerak emas",
-    "rad etaman", "bron yo'q", "bron cancel",
-    "bron toxtat", "kerak emas bron",
+    "rad etaman", "bron cancel", "bron toxtat",
 ]
 
+# ──────────────────────────────────────────────
+# SANA PARSE
+# ──────────────────────────────────────────────
 
-async def _build_system_prompt(user_platform: str = "telegram") -> str:
-    """Kuchli system prompt — barcha savolga javob beradi"""
+MONTH_MAP = {
+    "yanvar": 1, "yanvarь": 1, "january": 1, "jan": 1,
+    "fevral": 2, "fevralь": 2, "february": 2, "feb": 2,
+    "mart": 3, "march": 3, "mar": 3,
+    "aprel": 4, "april": 4, "apr": 4,
+    "may": 5,
+    "iyun": 6, "iyunь": 6, "june": 6, "jun": 6,
+    "iyul": 7, "iyulь": 7, "july": 7, "jul": 7,
+    "avgust": 8, "august": 8, "aug": 8,
+    "sentabr": 9, "sentyabr": 9, "september": 9, "sep": 9,
+    "oktyabr": 10, "october": 10, "oct": 10,
+    "noyabr": 11, "november": 11, "nov": 11,
+    "dekabr": 12, "december": 12, "dec": 12,
+}
+
+
+def _parse_date(text: str) -> str | None:
+    """
+    Matndan sanani YYYY-MM-DD formatida qaytaradi.
+    'mart 12', '12 mart', '2026-03-12', '12.03', '12/03' kabi formatlarni qabul qiladi.
+    """
+    text = text.strip().lower()
+    today = datetime.now()
+    year = today.year
+
+    # YYYY-MM-DD
+    m = re.search(r'(\d{4})[-./](\d{1,2})[-./](\d{1,2})', text)
+    if m:
+        return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+
+    # DD.MM.YYYY yoki DD/MM/YYYY
+    m = re.search(r'(\d{1,2})[-./](\d{1,2})[-./](\d{4})', text)
+    if m:
+        return f"{m.group(3)}-{int(m.group(2)):02d}-{int(m.group(1)):02d}"
+
+    # DD.MM (yil yo'q)
+    m = re.search(r'(\d{1,2})[-./](\d{1,2})$', text)
+    if m:
+        day, month = int(m.group(1)), int(m.group(2))
+        # Kelajakdagi yilni topish
+        dt = datetime(year, month, day)
+        if dt.date() < today.date():
+            dt = datetime(year + 1, month, day)
+        return dt.strftime("%Y-%m-%d")
+
+    # "12 mart", "mart 12", "12-mart"
+    for month_name, month_num in MONTH_MAP.items():
+        # "12 mart" yoki "12-mart"
+        m = re.search(rf'(\d{{1,2}})\s*[-]?\s*{month_name}', text)
+        if m:
+            day = int(m.group(1))
+            try:
+                dt = datetime(year, month_num, day)
+                if dt.date() < today.date():
+                    dt = datetime(year + 1, month_num, day)
+                return dt.strftime("%Y-%m-%d")
+            except ValueError:
+                continue
+        # "mart 12"
+        m = re.search(rf'{month_name}\s*[-]?\s*(\d{{1,2}})', text)
+        if m:
+            day = int(m.group(1))
+            try:
+                dt = datetime(year, month_num, day)
+                if dt.date() < today.date():
+                    dt = datetime(year + 1, month_num, day)
+                return dt.strftime("%Y-%m-%d")
+            except ValueError:
+                continue
+
+    return None
+
+
+# ──────────────────────────────────────────────
+# SYSTEM PROMPT
+# ──────────────────────────────────────────────
+
+async def _build_system_prompt(platform: str = "telegram") -> str:
     hotel = await get_hotel()
     rooms = await get_rooms(only_active=True)
 
@@ -69,206 +141,47 @@ async def _build_system_prompt(user_platform: str = "telegram") -> str:
         price = f"{r['price']:,}".replace(",", " ")
         room_lines.append(
             f"- {r['name']}: {price} so'm/kun | {r['description']} | "
-            f"{r['capacity']} kishi sig'imi | {r.get('quantity', 1)} ta mavjud"
+            f"{r.get('capacity', 2)} kishi | {r.get('quantity', 1)} ta mavjud"
         )
-    rooms_text = "\n".join(room_lines) if room_lines else "Hozircha xonalar ma'lumotlari yangilanmoqda"
+    rooms_text = "\n".join(room_lines) if room_lines else "Xonalar yangilanmoqda"
 
     hotel_phone = hotel.get('phone', '+998773397171')
-    hotel_phone2 = hotel.get('phone_2', '+998771577171')
     hotel_address = hotel.get('address', "Do'mbirobod Naqqoshlik 121A")
     hotel_telegram = hotel.get('telegram', '@Marcopolohotel_1')
+    bugun = datetime.now().strftime("%Y-%m-%d, %A")
 
     platform_note = ""
-    if user_platform == "instagram":
-        platform_note = "\nPlatforma: Instagram Direct. HTML teglari ishlatma, oddiy matn yoz."
-    
-    bugun = datetime.now().strftime("%Y-%m-%d, %A")
-    return f"""Sen Marco Polo Hotel ning juda ham e'tiborli, nihoyatda samimiy, xushmuomala va professional AI yordamchisisan.
-Sening asosiy vazifang — foydalanuvchining BARCHA savollariga erinmasdan, 100% TO'LIQ, BATAFSIL va ILIQ javob berish. Mijoz doimo o'zini eng qadrdon mehmonday his qilishi kerak!{platform_note}
+    if platform == "instagram":
+        platform_note = "\nPlatforma: Instagram. HTML teglarsiz, oddiy matn yoz."
 
-Bugungi sana va vaqt: {bugun}. Sanalarni aynan shu bugungi kunga nisbatan aniq hisoblab javob ber!
+    return f"""Sen Marco Polo Hotel ning samimiy va professional AI yordamchisissan.{platform_note}
+Bugun: {bugun}
 
-═══════════════════════════════════
-MEHMONXONA MA'LUMOTLARI:
-═══════════════════════════════════
-Nomi: Marco Polo Hotel 🏩
-Manzil: {hotel_address}, Toshkent, Chilonzor tumani
-Asosiy telefon: {hotel_phone}
-Qo'shimcha telefon: {hotel_phone2}
+MEHMONXONA:
+Nomi: Marco Polo Hotel
+Manzil: {hotel_address}, Toshkent
+Telefon: {hotel_phone}
 Telegram: {hotel_telegram}
 
-XONALAR VA NARXLAR:
+XONALAR:
 {rooms_text}
 
-SOATLIK IJARA: 200,000 - 250,000 so'm (kelishuv asosida)
+SOATLIK IJARA: 200 000 - 250 000 so'm
 
-AFZALLIKLAR VA XIZMATLAR:
-✅ Maxfiylik 100% kafolatlanadi
-✅ ZAGS talab qilinmaydi — 1 ta pasport yetarli
-✅ Spa salon va dam olish maskani
-✅ Lounge bar
-✅ SMART TV barcha xonalarda
-✅ Tezkor Wi-Fi
-✅ Konditsioner (isitish/sovutish)
-✅ Sutkalik qo'riqlash
-✅ Qulay to'xtash joyi
-✅ 24/7 qabulxona xizmati
+XIZMATLAR: Maxfiylik 100%, ZAGS talab yo'q (1 pasport), Spa, Lounge bar, SMART TV, Wi-Fi, Konditsioner, 24/7 qabulxona, Xavfsiz avto to'xtash joyi
 
-═══════════════════════════════════
-JAVOB BERISH QO'LLANMASI:
-═══════════════════════════════════
-
-1. 100% SAMIMIY VA BATAFSIL JAVOB BER:
-   - Mehmonxona haqida har qanday savol (narx, manzil, joylashuv, xizmatlar) bo'lsa — erinmasdan, batafsil va eng chiroyli so'zlar bilan javob ber.
-   - Hech qachon qisqa javob qaytarma, doim mijozni hurmat bilan "Siz" deb murojaat qil.
-   - "Bilmayman" dema — doim alternativ yechim taklif qil yoki aloqa raqamini ber: {hotel_phone}.
-   - Salomlashsa — eng issiq va chiroyli so'zlar bilan kutib ol. O'zingni mehmonxona xodimi sifatida his qil.
-
-2. BRON QILISH SO'RALSA:
-   Quyidagi tartibda juda muloyimlik bilan ma'lumot so'ra (faqat yetishmayotganlarini birma-bir):
-   a) Ism (agar noma'lum bo'lsa)
-   b) Qaysi xona (agar aytilmagan bo'lsa)
-   c) Kelish sanasi
-   d) Ketish sanasi
-   e) Necha kishi mehmonga kelishi
-   f) Telefon raqami
-
-3. TILLAR VA MUOMALA MADANIYATI:
-   - Mijoz qaysi tilda yozsa (O'zbek, Rus, Ingliz), o'sha tilda mukammal va xatosiz yoz.
-   - Savollar ko'p bo'lsa barchasiga bittalab javob ber. Hech bir e'tiborsiz qoldirilmasin.
-
-4. USLUB:
-   - O'ta do'stona, insoniylik hissi bilan (robotdek emas).
-   - Javoblarni uzun bo'lsa chiroyli formatda (nuqtali ro'yxatlar) berib o't.
-   - Matn oxiriga doim qo'shimcha yordam kerakmi deb muloyim so'ra.
-   - Mos va o'rinli emojilardan chiroyli foydalan.
-
-═══════════════════════════════════
-MUHIM: Har bir so'zingda samimiylik sezilsin. Maqsad — bot orqali muloqot qilgan insonga ajoyib kayfiyat ulashish va mehmonxonaga kelish ishtiyoqini uyg'otish!
-═══════════════════════════════════"""
+QO'LLANMA:
+- Har qanday savol bo'lsa to'liq va iliq javob ber
+- Mijozga "Siz" deb murojaat qil
+- Rus, O'zbek, Ingliz tillarida javob ber
+- Faqat oddiy matn yoz, markdown ishlatma (** yoki __ yo'q)
+- Bron so'rasa men o'zim boshqaraman, sen shunchaki suhbatni davom ettir
+- Telefon: {hotel_phone}"""
 
 
-def _is_booking_intent(text: str) -> bool:
-    """Foydalanuvchi bron qilmoqchi ekanligini aniqlash"""
-    t = text.lower().strip()
-    return any(kw in t for kw in BOOKING_INTENT_KEYWORDS)
-
-
-def _is_cancel_intent(text: str) -> bool:
-    """
-    Faqat ANIQ bron bekor qilish so'rovini aniqlash.
-    'yo\'q', 'boshqa', 'bekor' kabi oddiy so'zlarni sezmasligi kerak.
-    """
-    t = text.lower().strip()
-    # Faqat kuchli signal beruvchi birikmalar
-    return any(kw in t for kw in BOOKING_CANCEL_KEYWORDS)
-
-
-def _is_greeting(text: str) -> bool:
-    t = text.lower().strip()
-    greetings = [
-        "salom", "assalomu alaykum", "assalom", "hello", "hi",
-        "hey", "привет", "здравствуйте", "xayr", "qalaysiz",
-    ]
-    return any(t.startswith(g) or t == g for g in greetings)
-
-
-async def extract_booking_info(text: str) -> dict | None:
-    """Foydalanuvchi xabaridan bron ma'lumotlarini Function Calling yordamida ajratish"""
-    text_lower = text.lower().strip()
-    if not text_lower:
-        return None
-
-    tools = [
-        {
-            "type": "function",
-            "function": {
-                "name": "extract_booking",
-                "description": "Foydalanuvchi yozgan matndan mehmonxona bron parametrlarini ajratib olish.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "name": {"type": "string", "description": "Mijozning to'liq ismi (agar yozgan bo'lsa)"},
-                        "phone": {"type": "string", "description": "Telefon raqami (masalan +998901234567)"},
-                        "check_in": {"type": "string", "description": "Kelish sanasi YYYY-MM-DD formatida (Bugungi sanaga nisbatan top)"},
-                        "check_out": {"type": "string", "description": "Ketish sanasi YYYY-MM-DD formatida"},
-                        "guests": {"type": "integer", "description": "Mehmonlar yoki odamlar soni (raqamda)"},
-                        "room_type": {"type": "string", "description": "Xona turi yoki nomi (masalan: delux, premium)"},
-                        "room_choice_index": {"type": "integer", "description": "Agar ro'yxatdan tartib raqam bilan xona tanlagan bo'lsa (1, 2, 3...)"}
-                    }
-                }
-            }
-        }
-    ]
-
-    try:
-        bugun = datetime.now().strftime("%Y-%m-%d, %A")
-        client = get_openai_client()
-        response = await client.chat.completions.create(
-            model=MODEL,
-            messages=[
-                {"role": "system", "content": f"Foydalanuvchi gapidan ma'lumotlarni aniq ajrat. Bugun: {bugun}"},
-                {"role": "user", "content": text}
-            ],
-            tools=tools,
-            tool_choice={"type": "function", "function": {"name": "extract_booking"}},
-            temperature=0.0
-        )
-
-        message = response.choices[0].message
-        if message.tool_calls:
-            args = json.loads(message.tool_calls[0].function.arguments)
-            if any(args.values()):
-                return {
-                    'name': args.get('name'),
-                    'phone': args.get('phone'),
-                    'check_in': args.get('check_in'),
-                    'check_out': args.get('check_out'),
-                    'guests': args.get('guests'),
-                    'room_type': args.get('room_type'),
-                    'room_choice_index': args.get('room_choice_index')
-                }
-    except Exception as e:
-        log.error(f"[AI FUNCTION CALL ERROR] {e}")
-
-    return None
-
-
-def _merge_booking(draft: dict, info: dict) -> dict:
-    merged = dict(draft)
-    for key, value in info.items():
-        if value is not None and value != "":
-            merged[key] = value
-    return merged
-
-
-def _next_missing_field(draft: dict) -> str | None:
-    if not draft.get("name"):
-        return "name"
-    if not draft.get("room_type") and not draft.get("room_choice_index") and not draft.get("room_id"):
-        return "room"
-    if not draft.get("check_in"):
-        return "check_in"
-    if not draft.get("check_out"):
-        return "check_out"
-    if not draft.get("guests"):
-        return "guests"
-    if not draft.get("phone"):
-        return "phone"
-    return None
-
-
-def _missing_question(missing: str) -> str:
-    questions = {
-        "name": "Ismingizni yozib yuboring, iltimos 😊",
-        "room": "Qaysi xona kerak? Xona nomini yoki ro'yxatdan raqamini yozing.",
-        "check_in": "Kelish sanangizni yuboring (masalan: 2026-05-10).",
-        "check_out": "Ketish sanangizni yuboring (masalan: 2026-05-12).",
-        "guests": "Necha kishi bo'ladi? (raqam bilan yozing, masalan: 2)",
-        "phone": "Telefon raqamingizni yuboring (+998901234567).",
-    }
-    return questions.get(missing, "")
-
+# ──────────────────────────────────────────────
+# XOTIRANI BOSHQARISH
+# ──────────────────────────────────────────────
 
 def get_history(user_id: str) -> list:
     return list(_store.get(str(user_id), []))
@@ -290,266 +203,311 @@ def active_users() -> int:
     return len(_store)
 
 
-async def _ai_reply(user_id: str, user_message: str, platform: str = "telegram", append_system_prompt: str = "") -> str:
-    """OpenAI orqali javob olish"""
-    history = get_history(user_id)
-    system_prompt = await _build_system_prompt(platform)
+# ──────────────────────────────────────────────
+# AI JAVOB
+# ──────────────────────────────────────────────
 
-    if append_system_prompt:
-        system_prompt += f"\n\nMUHIM QO'SHIMCHA KO'RSATMA:\n{append_system_prompt}"
+async def _ai_reply(user_id: str, user_message: str, platform: str = "telegram", extra_instruction: str = "") -> str:
+    history = get_history(user_id)
+    system = await _build_system_prompt(platform)
+    if extra_instruction:
+        system += f"\n\nQO'SHIMCHA: {extra_instruction}"
 
     messages = [
-        {"role": "system", "content": system_prompt},
+        {"role": "system", "content": system},
         *history,
         {"role": "user", "content": user_message},
     ]
 
     try:
         client = get_openai_client()
-        response = await client.chat.completions.create(
+        resp = await client.chat.completions.create(
             model=MODEL,
             messages=messages,
-            max_tokens=700,
-            temperature=0.75,
+            max_tokens=600,
+            temperature=0.7,
         )
-        return response.choices[0].message.content.strip()
+        text = resp.choices[0].message.content.strip()
+        # Markdown tozalash — bold/italic belgilarini olib tashlash
+        text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
+        text = re.sub(r'\*(.+?)\*', r'\1', text)
+        text = re.sub(r'__(.+?)__', r'\1', text)
+        text = re.sub(r'_(.+?)_', r'\1', text)
+        return text
     except Exception as e:
-        import traceback
-        log.error(f"[AI ERROR OPENAI] {e}\n{traceback.format_exc()}")
+        log.error(f"[AI ERROR] {e}")
         hotel = await get_hotel()
-        return (
-            f"Kechirasiz, hozir texnik muammo bor. "
-            f"Iltimos, to'g'ridan-to'g'ri bog'laning:\n"
-            f"📞 {hotel.get('phone', '+998773397171')}"
+        return f"Kechirasiz, texnik muammo. Iltimos, to'g'ridan-to'g'ri bog'laning:\n📞 {hotel.get('phone', '+998773397171')}"
+
+
+# ──────────────────────────────────────────────
+# BRON JARAYONI YORDAMCHILARI
+# ──────────────────────────────────────────────
+
+def _is_booking_intent(text: str) -> bool:
+    t = text.lower().strip()
+    return any(kw in t for kw in BOOKING_INTENT_KEYWORDS)
+
+
+def _is_cancel_intent(text: str) -> bool:
+    t = text.lower().strip()
+    return any(kw in t for kw in BOOKING_CANCEL_KEYWORDS)
+
+
+def _next_missing(draft: dict) -> str | None:
+    """Qaysi maydon yetishmayapti"""
+    if not draft.get("room_id"):
+        return "room"
+    if not draft.get("check_in"):
+        return "check_in"
+    if not draft.get("check_out"):
+        return "check_out"
+    if not draft.get("guests"):
+        return "guests"
+    if not draft.get("phone"):
+        return "phone"
+    return None
+
+
+def _format_room_list(rooms: list) -> str:
+    lines = ["Qaysi xonani tanlaysiz?\n"]
+    for i, r in enumerate(rooms, 1):
+        price = f"{r['price']:,}".replace(",", " ")
+        lines.append(
+            f"{i}. {r['name']} — {price} so'm/kun "
+            f"| {r.get('description', '')} "
+            f"| {r.get('capacity', 2)} kishigacha"
         )
+    lines.append("\nXona nomini yoki raqamini yozing.")
+    return "\n".join(lines)
 
 
-async def _handle_booking_flow(
-    user_id: str,
-    user_message: str,
-    platform: str,
-    booking_info: dict | None,
-) -> str | dict | None:
+async def _resolve_room(draft: dict, user_message: str, rooms: list) -> dict | None:
+    """Foydalanuvchi xabaridan xonani topish"""
+    text = user_message.strip().lower()
+
+    # Raqam bilan tanlash: "1", "2", "1 maqul", "1 dedimu", "birinchi" va h.k.
+    # Xabarning boshida yoki yolg'iz turgan raqam
+    num_match = re.match(r'^(\d+)', text)
+    if num_match:
+        idx = int(num_match.group(1)) - 1
+        if 0 <= idx < len(rooms):
+            return rooms[idx]
+
+    # So'zli raqam
+    word_nums = {
+        "birinchi": 0, "ikkinchi": 1, "uchinchi": 2,
+        "to'rtinchi": 3, "beshinchi": 4, "oltinchi": 5,
+        "first": 0, "second": 1, "third": 2,
+    }
+    for word, idx in word_nums.items():
+        if word in text and 0 <= idx < len(rooms):
+            return rooms[idx]
+
+    # Nom bo'yicha qidirish
+    for r in rooms:
+        if r["name"].lower() in text or r["id"].lower() in text:
+            return r
+        # Qisqa nom: "standart", "delux", "suite", "vip", "family", "premium"
+        short = r["name"].lower().split()[0]
+        if short in text:
+            return r
+
+    # draft da room_id allaqachon bor
+    if draft.get("room_id"):
+        for r in rooms:
+            if r["id"] == draft["room_id"]:
+                return r
+
+    return None
+
+
+# ──────────────────────────────────────────────
+# ASOSIY BRON JARAYONI
+# ──────────────────────────────────────────────
+
+async def _handle_booking_flow(user_id: str, user_message: str, platform: str) -> str | None:
     """
-    Faqat foydalanuvchi bron qilmoqchi bo'lganda ishlaydigan funksiya.
-    Agar bron jarayoni aktiv bo'lmasa va foydalanuvchi bron so'ramasa — None qaytaradi.
+    Bron jarayonini boshqaradi.
+    Agar bron aktiv yoki intent bo'lsa — javob qaytaradi.
+    Aks holda None qaytaradi (AI ga uzatiladi).
     """
-    text_lower = user_message.lower().strip()
-    draft = BOOKING_DRAFT.get(user_id, {})
-    draft_before = draft.copy()
+    draft = BOOKING_DRAFT.get(user_id)
 
-    # Agar draft ACTIVE bo'lmasa va foydalanuvchi bron so'ramasa — chiqib ket
-    if not draft and not _is_booking_intent(user_message):
+    # Bron jarayoni aktiv emas va intent yo'q — AI ga uzat
+    if draft is None and not _is_booking_intent(user_message):
         return None
 
     # Bron bekor qilish
-    if _is_cancel_intent(user_message) and draft:
+    if _is_cancel_intent(user_message) and draft is not None:
         BOOKING_DRAFT.pop(user_id, None)
         BOOKING_STORE.pop(user_id, None)
         return "Bron jarayoni bekor qilindi. Boshqa savol bo'lsa, yozing! 😊"
 
-    # Yangi bron — draft tozalash
-    if _is_booking_intent(user_message) and not draft:
-        BOOKING_DRAFT.pop(user_id, None)
-        BOOKING_STORE.pop(user_id, None)
+    # Yangi bron boshlash
+    if draft is None:
         draft = {}
-
-    # Booking info ni draft ga qo'shish
-    if booking_info:
-        # Agar check_in bor, lekin check_out yo'q bo'lsa va yangi sana kelsa
-        if (
-            booking_info.get("check_in")
-            and not booking_info.get("check_out")
-            and draft.get("check_in")
-            and not draft.get("check_out")
-        ):
-            booking_info["check_out"] = booking_info["check_in"]
-            booking_info["check_in"] = None
-        draft = _merge_booking(draft, booking_info)
         BOOKING_DRAFT[user_id] = draft
 
-    # Telegram foydalanuvchi uchun DB dan ma'lumot to'ldirish
-    if user_id.startswith("tg_"):
-        db_user = await get_user(user_id.replace("tg_", ""))
-        if db_user:
-            if not draft.get("name"):
+        # Telegram foydalanuvchisi uchun DB dan ism/telefon to'ldirish
+        if user_id.startswith("tg_"):
+            tg_uid = user_id.replace("tg_", "")
+            db_user = await get_user(tg_uid)
+            if db_user:
                 first = db_user.get("first_name") or ""
                 last = db_user.get("last_name") or ""
                 full = (first + " " + last).strip()
                 if full:
                     draft["name"] = full
-                    BOOKING_DRAFT[user_id] = draft
-            if not draft.get("phone") and db_user.get("phone"):
-                draft["phone"] = db_user.get("phone")
-                BOOKING_DRAFT[user_id] = draft
+                if db_user.get("phone"):
+                    draft["phone"] = db_user["phone"]
 
-    # Ism faqat harflardan iborat bo'lsa qabul qil
-    if not draft.get("name"):
-        name_only = re.fullmatch(
-            r'[A-Za-zА-Яа-яЁё]+(?:\s+[A-Za-zА-Яа-яЁё]+)?',
-            user_message.strip()
-        )
-        if name_only and not re.search(r'\d', user_message):
-            draft["name"] = user_message.strip().title()
-            BOOKING_DRAFT[user_id] = draft
-
-    # Mehmonlar soni — sof raqam bo'lsa
-    missing = _next_missing_field(draft)
-    if missing == "guests":
-        text_norm = user_message.strip().lower()
-        date_words = [
-            "yanvar", "fevral", "mart", "aprel", "may", "iyun",
-            "iyul", "avgust", "sentabr", "oktyabr", "noyabr", "dekabr"
-        ]
-        has_date = any(m in text_norm for m in date_words) or bool(
-            re.search(r"\d{4}[-./]\d{1,2}[-./]\d{1,2}", text_norm)
-        )
-        explicit_guest = re.search(r"(\d+)\s*(kishi|odam|mehmon|nafar|ta kishi)", text_norm)
-        pure_number = re.fullmatch(r"\d+", text_norm)
-        if explicit_guest:
-            draft["guests"] = int(explicit_guest.group(1))
-            BOOKING_DRAFT[user_id] = draft
-            missing = _next_missing_field(draft)
-        elif pure_number and not has_date:
-            draft["guests"] = int(text_norm)
-            BOOKING_DRAFT[user_id] = draft
-            missing = _next_missing_field(draft)
-
-    # Telefon — noto'g'ri format
-    if missing == "phone":
-        phone_candidate = user_message.strip()
-        looks_like_phone = (
-            '+998' in phone_candidate
-            or phone_candidate.startswith('998')
-            or re.fullmatch(r'\d{9,12}', phone_candidate.replace(" ", ""))
-        )
-        if looks_like_phone:
-            clean = phone_candidate.replace(" ", "").replace("-", "")
-            if not clean.startswith('+'):
-                clean = '+' + clean
-            if re.fullmatch(r'\+998\d{9}', clean):
-                draft['phone'] = clean
-                BOOKING_DRAFT[user_id] = draft
-                missing = _next_missing_field(draft)
-            else:
-                return "📞 Telefon raqam formati noto'g'ri. Iltimos, quyidagi formatda yozing: +998901234567"
-
-    # Keyingi bo'sh maydon bo'lsa — savol ber
-    missing = _next_missing_field(draft)
-    if missing:
-        # Xona ro'yxatini ko'rsatish
-        if missing == "room":
-            rooms = await get_rooms(only_active=True)
-            if rooms:
-                lines = ["Qaysi xonani tanlaysiz?\n"]
-                for idx, room in enumerate(rooms, start=1):
-                    price = f"{room['price']:,}".replace(",", " ")
-                    lines.append(
-                        f"{idx}. 🛏 {room['name']} — {price} so'm/kun "
-                        f"| {room.get('description', '')} "
-                        f"| {room.get('capacity', 1)} kishigacha"
-                    )
-                lines.append("\nNom yoki raqam bilan yozing.")
-                missing_text = "\n".join(lines)
-            else:
-                missing_text = _missing_question(missing)
-        else:
-            missing_text = _missing_question(missing)
-            
-        if draft == draft_before:
-            return {"type": "ai_append", "text": missing_text, "missing_field": missing}
-        return missing_text
-
-    # Barcha ma'lumot to'liq — xona topish
     rooms_all = await get_rooms(only_active=True)
-    room = None
+    missing = _next_missing(draft)
 
-    if draft.get("room_choice_index"):
-        idx = draft["room_choice_index"] - 1
-        if 0 <= idx < len(rooms_all):
-            room = rooms_all[idx]
-
-    if not room and draft.get("room_type"):
-        room = next(
-            (
-                r for r in rooms_all
-                if draft["room_type"].lower() in r["id"].lower()
-                or draft["room_type"].lower() in r["name"].lower()
-            ),
-            None,
-        )
-
-    if not room:
-        for r in rooms_all:
-            if r["name"].lower() in text_lower:
-                room = r
-                break
-
-    if not room:
-        BOOKING_DRAFT[user_id] = draft
-        lines = ["Xona topilmadi. Qaysi xona kerak?\n"]
-        for idx, r in enumerate(rooms_all, start=1):
-            price = f"{r['price']:,}".replace(",", " ")
-            lines.append(f"{idx}. {r['name']} — {price} so'm/kun")
-        return "\n".join(lines)
-
-    # Sanani tekshirish
-    try:
-        check_in_dt = datetime.strptime(draft["check_in"], "%Y-%m-%d")
-        check_out_dt = datetime.strptime(draft["check_out"], "%Y-%m-%d")
-    except Exception:
-        draft["check_in"] = None
-        draft["check_out"] = None
-        BOOKING_DRAFT[user_id] = draft
-        return "Sana formati noto'g'ri. Iltimos, YYYY-MM-DD formatida yozing. Masalan: 2026-05-10"
-
-    days = (check_out_dt - check_in_dt).days
-    if days <= 0:
-        draft["check_out"] = None
-        BOOKING_DRAFT[user_id] = draft
-        return "❗ Ketish sanasi kelish sanasidan keyin bo'lishi kerak. Ketish sanasini qayta yuboring."
-
-    # Sig'im tekshirish
-    if int(draft["guests"]) > int(room.get("capacity", 1)):
-        capacity = room.get("capacity", 1)
-        draft["guests"] = None
-        BOOKING_DRAFT[user_id] = draft
-        return (
-            f"⚠️ {room['name']} xonasi {capacity} kishigacha. "
-            f"Boshqa xona tanlaysizmi yoki mehmonlar sonini kamaytirasizmi?"
-        )
-
-    # Mavjudlik tekshirish
-    available_rooms = await find_available_rooms(
-        draft["check_in"], draft["check_out"], only_active=True
-    )
-    if room["id"] not in {r["id"] for r in available_rooms}:
-        if available_rooms:
-            room_names = "\n".join(
-                f"- {r['name']} ({r.get('available_count', 0)} ta)"
-                for r in available_rooms
-            )
-            draft["availability_needed"] = True
-            draft["available_rooms"] = available_rooms
+    # ── XONA TANLASH ────────────────────────────────────
+    if missing == "room":
+        room = await _resolve_room(draft, user_message, rooms_all)
+        if room:
+            draft["room_id"] = room["id"]
+            draft["room_name"] = room["name"]
+            draft["room_price"] = room["price"]
+            draft["room_capacity"] = room.get("capacity", 2)
             BOOKING_DRAFT[user_id] = draft
-            return (
-                f"😔 Tanlagan xonangiz bu sanalarda band.\n\n"
-                f"Mavjud xonalar:\n{room_names}\n\n"
-                f"Boshqa xona tanlaysizmi?"
-            )
+            missing = _next_missing(draft)
+            # Keyingi savolga o't
+        else:
+            # Xona tushunilmadi — ro'yxat ko'rsat
+            BOOKING_DRAFT[user_id] = draft
+            return _format_room_list(rooms_all)
+
+    # ── KELISH SANASI ────────────────────────────────────
+    if missing == "check_in":
+        date_str = _parse_date(user_message)
+        if date_str:
+            check_in_dt = datetime.strptime(date_str, "%Y-%m-%d")
+            if check_in_dt.date() < datetime.now().date():
+                return "❗ Kelish sanasi o'tib ketgan. Iltimos, bugun yoki kelajakdagi sanani yozing."
+            draft["check_in"] = date_str
+            BOOKING_DRAFT[user_id] = draft
+            missing = _next_missing(draft)
+        else:
+            return "📅 Kelish sanasini yozing (masalan: 10 may yoki 2026-05-10)."
+
+    # ── KETISH SANASI ────────────────────────────────────
+    if missing == "check_out":
+        date_str = _parse_date(user_message)
+        if date_str:
+            check_in_dt = datetime.strptime(draft["check_in"], "%Y-%m-%d")
+            check_out_dt = datetime.strptime(date_str, "%Y-%m-%d")
+            if check_out_dt <= check_in_dt:
+                return f"❗ Ketish sanasi kelish sanasidan ({draft['check_in']}) keyin bo'lishi kerak. Qayta yozing."
+            draft["check_out"] = date_str
+            BOOKING_DRAFT[user_id] = draft
+            missing = _next_missing(draft)
+        else:
+            return "📅 Ketish sanasini yozing (masalan: 15 may yoki 2026-05-15)."
+
+    # ── MEHMONLAR SONI ────────────────────────────────────
+    if missing == "guests":
+        # Sof raqam yoki "X kishi/nafar" formatini qabul qil
+        guests_match = re.search(r'(\d+)\s*(kishi|odam|mehmon|nafar|ta kishi)?', user_message.strip().lower())
+        if guests_match:
+            # Lekin sana so'zlari bo'lsa skip
+            date_words = list(MONTH_MAP.keys()) + ["-", "."]
+            has_date = any(m in user_message.lower() for m in date_words) or \
+                       re.search(r'\d{4}', user_message)
+            if not has_date:
+                n = int(guests_match.group(1))
+                capacity = draft.get("room_capacity", 2)
+                if n > capacity:
+                    return (
+                        f"⚠️ {draft['room_name']} xonasi {capacity} kishigacha sig'adi. "
+                        f"Mehmonlar sonini kamaytirasizmi yoki boshqa xona tanlaysizmi?"
+                    )
+                draft["guests"] = n
+                BOOKING_DRAFT[user_id] = draft
+                missing = _next_missing(draft)
+            else:
+                return "Necha kishi bo'ladi? (Raqam bilan yozing, masalan: 2)"
+        else:
+            return "Necha kishi bo'ladi? (Raqam bilan yozing, masalan: 2)"
+
+    # ── TELEFON ────────────────────────────────────
+    if missing == "phone":
+        phone_raw = user_message.strip().replace(" ", "").replace("-", "")
+        if not phone_raw.startswith("+"):
+            phone_raw = "+" + phone_raw
+        if re.fullmatch(r'\+998\d{9}', phone_raw):
+            draft["phone"] = phone_raw
+            BOOKING_DRAFT[user_id] = draft
+            missing = _next_missing(draft)
+        elif re.search(r'\d{9,}', user_message):
+            return "📞 Telefon raqam formati noto'g'ri. Quyidagi formatda yozing: +998901234567"
+        else:
+            return "📞 Telefon raqamingizni yozing (masalan: +998901234567)."
+
+    # ── HAMMA MA'LUMOT TO'LIQ ────────────────────────────────────
+    if _next_missing(draft) is None:
+        return await _finalize_booking(user_id, draft, platform, rooms_all)
+
+    # ── KEYINGI SAVOL ────────────────────────────────────
+    missing = _next_missing(draft)
+    if missing == "room":
+        return _format_room_list(rooms_all)
+    elif missing == "check_in":
+        return "📅 Kelish sanasini yozing (masalan: 10 may)."
+    elif missing == "check_out":
+        return f"📅 Ketish sanasini yozing (masalan: 15 may)."
+    elif missing == "guests":
+        return "👥 Necha kishi bo'ladi?"
+    elif missing == "phone":
+        return "📞 Telefon raqamingizni yozing (+998901234567)."
+
+    return None
+
+
+async def _finalize_booking(user_id: str, draft: dict, platform: str, rooms_all: list) -> str:
+    """Barcha ma'lumot to'liq — bron tasdiqlash xabarini qaytaradi"""
+    # Xonani tekshirish
+    room = None
+    for r in rooms_all:
+        if r["id"] == draft["room_id"]:
+            room = r
+            break
+
+    if not room:
+        BOOKING_DRAFT.pop(user_id, None)
+        return "Xona topilmadi. Iltimos, qayta boshlang."
+
+    # Mavjudlikni tekshirish
+    available = await find_available_rooms(draft["check_in"], draft["check_out"], only_active=True)
+    available_ids = {r["id"] for r in available}
+
+    if room["id"] not in available_ids:
+        other = [r for r in available if r["id"] != room["id"]]
+        if other:
+            draft["room_id"] = None
+            draft["room_name"] = None
+            BOOKING_DRAFT[user_id] = draft
+            lines = [f"😔 {room['name']} bu sanalarda band.\n\nBoshqa bo'sh xonalar:"]
+            for i, r in enumerate(other, 1):
+                price = f"{r['price']:,}".replace(",", " ")
+                lines.append(f"{i}. {r['name']} — {price} so'm/kun")
+            lines.append("\nBoshqa xona tanlaysizmi?")
+            return "\n".join(lines)
         else:
             draft["check_in"] = None
             draft["check_out"] = None
-            draft.pop("availability_needed", None)
             BOOKING_DRAFT[user_id] = draft
-            return (
-                "😔 Bu sanalarda bo'sh xona yo'q. "
-                "Boshqa sanalarni yozing, tekshirib beraman."
-            )
+            return "😔 Bu sanalarda bo'sh xona yo'q. Boshqa sanalarni yozing."
 
     # Narx hisoblash
-    total_price = room["price"] * days
-    price_fmt = f"{total_price:,}".replace(",", " ")
+    check_in_dt = datetime.strptime(draft["check_in"], "%Y-%m-%d")
+    check_out_dt = datetime.strptime(draft["check_out"], "%Y-%m-%d")
+    days = (check_out_dt - check_in_dt).days
+    total = room["price"] * days
+    price_fmt = f"{total:,}".replace(",", " ")
     day_price_fmt = f"{room['price']:,}".replace(",", " ")
 
     order_id = f"ORD-{datetime.now().strftime('%Y%m%d%H%M%S')}"
@@ -561,8 +519,8 @@ async def _handle_booking_flow(
         "check_in": draft["check_in"],
         "check_out": draft["check_out"],
         "guests": int(draft["guests"]),
-        "total_price": total_price,
-        "name": draft["name"],
+        "total_price": total,
+        "name": draft.get("name", "Mehmon"),
         "phone": draft["phone"],
         "notes": "",
         "source": platform,
@@ -570,18 +528,19 @@ async def _handle_booking_flow(
 
     BOOKING_STORE[user_id] = order_data
     BOOKING_DRAFT.pop(user_id, None)
-    log.info(f"[BOOKING] Stored: {order_id} for {user_id}")
+
+    name_line = f"👤 {draft.get('name', 'Mehmon')}\n" if draft.get("name") else ""
 
     if platform == "telegram":
         return (
-            f"<b>✅ Broningiz qabul qilindi!</b>\n\n"
+            f"✅ <b>Broningiz qabul qilindi!</b>\n\n"
             f"🏨 Xona: <b>{room['name']}</b>\n"
             f"📅 Kelish: {draft['check_in']}\n"
             f"📅 Ketish: {draft['check_out']}\n"
-            f"🕐 {days} kun × {day_price_fmt} so'm/kun\n"
+            f"🕐 {days} kun × {day_price_fmt} so'm\n"
             f"👥 {draft['guests']} kishi\n"
             f"💰 Jami: <b>{price_fmt} so'm</b>\n\n"
-            f"👤 {draft['name']}\n"
+            f"{name_line}"
             f"📞 {draft['phone']}\n\n"
             f"──────────────────────\n"
             f"✅ Tasdiqlash uchun: <b>Tasdiqlayman</b>\n"
@@ -596,13 +555,16 @@ async def _handle_booking_flow(
             f"🕐 {days} kun | {day_price_fmt} so'm/kun\n"
             f"👥 {draft['guests']} kishi\n"
             f"💰 Jami: {price_fmt} so'm\n\n"
-            f"👤 {draft['name']}\n"
+            f"{name_line}"
             f"📞 {draft['phone']}\n\n"
-            f"──────────────────────\n"
             f"Tasdiqlash uchun: Tasdiqlayman\n"
             f"Bekor qilish uchun: Bekor deb yozing."
         )
 
+
+# ──────────────────────────────────────────────
+# ASOSIY FUNKSIYA
+# ──────────────────────────────────────────────
 
 async def get_ai_response(
     user_id: str,
@@ -610,63 +572,27 @@ async def get_ai_response(
     user_name: str = "Mehmon",
     platform: str = "telegram",
 ) -> str:
-    """
-    Asosiy AI javob funksiyasi.
-    - Bron jarayoni aktiv bo'lsa → bron jarayoni
-    - Bron so'rasa → bron jarayoni
-    - Boshqa barcha savollar → OpenAI
-    """
-    text_lower = user_message.lower().strip()
     push_message(user_id, "user", user_message)
+    log.info(f"[AI] {user_id} ({platform}): {user_message[:80]}")
 
-    log.info(f"[AI] User={user_id} Platform={platform} Msg={user_message[:80]}")
-
-    # Salomlashish — bron drafti yo'q bo'lsa AI ga oddiy salomlash
-    if _is_greeting(user_message) and user_id not in BOOKING_DRAFT:
-        BOOKING_STORE.pop(user_id, None)
-        reply = await _ai_reply(user_id, user_message, platform)
-        push_message(user_id, "assistant", reply)
-        await log_message(user_id, "incoming", user_message, reply)
-        return reply
-
-    # Bron jarayoni aktiv bo'lsa yoki bron so'rasa
-    booking_info = None
-    if user_id in BOOKING_DRAFT or _is_booking_intent(user_message):
-        booking_info = await extract_booking_info(user_message)
-
-    booking_reply = await _handle_booking_flow(
-        user_id, user_message, platform, booking_info
-    )
-
-    if isinstance(booking_reply, dict) and booking_reply.get("type") == "ai_append":
-        append_sys = (
-            f"Foydalanuvchi hozir bron qilish jarayonida (navbatdagi qadam: {booking_reply.get('missing_field')}), "
-            "lekin savol berdi yoki tushunarsiz javob yozdi. Zudlik bilan uning oxirgi xabariga to'liq javob berib, "
-            f"keyin oxirida albatta quyidagi ma'lumotni so'rab/ko'rsatib qo'y:\n\n{booking_reply['text']}"
-        )
-        reply = await _ai_reply(user_id, user_message, platform, append_sys)
-        push_message(user_id, "assistant", reply)
-        await log_message(user_id, "incoming", user_message, reply)
-        return reply
-
+    # Bron jarayoni
+    booking_reply = await _handle_booking_flow(user_id, user_message, platform)
     if booking_reply is not None:
         push_message(user_id, "assistant", booking_reply)
         await log_message(user_id, "incoming", user_message, booking_reply)
         return booking_reply
 
-    # Barcha boshqa savollar — OpenAI ga yuborish
+    # Oddiy AI javob
     reply = await _ai_reply(user_id, user_message, platform)
-
     push_message(user_id, "assistant", reply)
     await log_message(user_id, "incoming", user_message, reply)
     await log_activity(user_id, "chat", user_message[:50])
-
     return reply
 
 
-# ──────────────────────────────────────────────────
-# Yordamchi funksiyalar
-# ──────────────────────────────────────────────────
+# ──────────────────────────────────────────────
+# YORDAMCHI FUNKSIYALAR
+# ──────────────────────────────────────────────
 
 def get_booking_data(user_id: str) -> dict | None:
     return BOOKING_STORE.get(str(user_id))
@@ -682,19 +608,20 @@ async def generate_post(topic: str, hotel_name: str) -> str:
         f"Marco Polo Hotel uchun Telegram post yoz:\n"
         f"Mavzu: {topic}\n"
         f"Format: Sarlavha, Matn (3-5 jumla), Narxlar, "
-        f"📞 {hotel.get('phone', '+998773397171')} | {hotel.get('telegram', '@Marcopolohotel_1')}"
+        f"📞 {hotel.get('phone', '+998773397171')} | {hotel.get('telegram', '@Marcopolohotel_1')}\n"
+        f"Faqat oddiy matn, markdown ishlatma."
     )
     try:
         client = get_openai_client()
-        response = await client.chat.completions.create(
+        resp = await client.chat.completions.create(
             model=MODEL,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=500,
             temperature=0.8,
         )
-        return response.choices[0].message.content.strip()
+        return resp.choices[0].message.content.strip()
     except Exception as e:
-        log.error(f"Post yaratishda xatolik: {e}")
+        log.error(f"Post error: {e}")
         return "Post yaratishda xatolik. Qayta urinib ko'ring."
 
 
@@ -703,16 +630,14 @@ async def generate_booking_confirmation(order_data: dict) -> str:
     price_fmt = f"{order_data['total_price']:,}".replace(",", " ")
     return (
         f"✅ BUYURTMA QABUL QILINDI!\n\n"
-        f"════════════════════════\n"
         f"🏨 Xona: {order_data['room_name']}\n"
         f"📅 Kelish: {order_data['check_in']}\n"
         f"📅 Ketish: {order_data['check_out']}\n"
         f"👥 Mehmonlar: {order_data['guests']} kishi\n"
         f"💰 Jami: {price_fmt} so'm\n\n"
         f"👤 Ism: {order_data['name']}\n"
-        f"📞 Telefon: {order_data['phone']}\n"
-        f"════════════════════════\n\n"
-        f"⏱ Operator tez orada siz bilan bog'lanadi!\n\n"
+        f"📞 Telefon: {order_data['phone']}\n\n"
+        f"⏱ Operator tez orada siz bilan bog'lanadi!\n"
         f"📞 {hotel.get('phone', '+998773397171')}"
     )
 
@@ -721,36 +646,31 @@ async def send_order_to_admins(bot, order_data: dict, admin_ids: list):
     hotel = await get_hotel()
     price_fmt = f"{order_data['total_price']:,}".replace(",", " ")
     hotel_address = hotel.get('address', "Do'mbirobod Naqqoshlik 121A")
-
     source_label = order_data.get('source', 'telegram').upper()
+
     message = (
         f"🔔 <b>YANGI BRON! [{source_label}]</b>\n\n"
-        f"════════════════════════\n"
         f"🏨 Xona: <b>{order_data['room_name']}</b>\n"
         f"📅 {order_data['check_in']} → {order_data['check_out']}\n"
         f"👥 {order_data['guests']} kishi\n"
         f"💰 <b>{price_fmt} so'm</b>\n\n"
         f"👤 {order_data['name']}\n"
         f"📞 {order_data['phone']}\n"
-        f"════════════════════════\n"
-        f"📍 Manzil: {hotel_address}"
+        f"📍 {hotel_address}"
     )
 
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
     phone_clean = order_data.get('phone', '').replace('tel:', '').strip()
-    keyboard_buttons = [
+    buttons = [
         [
             InlineKeyboardButton(text="✅ Tasdiqlash", callback_data=f"order_confirm_{order_data['id']}"),
             InlineKeyboardButton(text="❌ Bekor", callback_data=f"order_cancel_{order_data['id']}"),
         ]
     ]
     if phone_clean and phone_clean.startswith('+'):
-        keyboard_buttons.append(
-            [InlineKeyboardButton(text="📞 Qo'ng'iroq", url=f"tel:{phone_clean}")]
-        )
+        buttons.append([InlineKeyboardButton(text="📞 Qo'ng'iroq", url=f"tel:{phone_clean}")])
 
-    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
 
     for admin_id in admin_ids:
         try:
@@ -758,7 +678,6 @@ async def send_order_to_admins(bot, order_data: dict, admin_ids: list):
         except Exception as e:
             log.error(f"Admin notify error ({admin_id}): {e}")
 
-    # Guruhga ham yuborish
     if os.getenv("ORDERS_GROUP_ID"):
         try:
             await bot.send_message(int(os.getenv("ORDERS_GROUP_ID")), message)
