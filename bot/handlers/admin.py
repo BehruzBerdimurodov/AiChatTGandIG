@@ -11,15 +11,53 @@ from aiogram import Router, F, Bot
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
+from aiogram.types import (
+    Message,
+    CallbackQuery,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    InputMediaPhoto,
+    Location,
+)
 
 from app.ai_handler import generate_post, active_users
 from config.database import (
-    is_admin, get_rooms, get_room, add_room, update_room, delete_room,
-    get_hotel, update_hotel, get_channels, add_channel as db_add_channel, remove_channel,
-    get_post_channel, set_post_channel, clear_post_channel, add_admin as db_add_admin, remove_admin as db_remove_admin, get_admins,
-    get_user_count, get_orders, get_order, update_order, get_all_users,
-    get_daily_stats, get_monthly_stats, log_activity, find_available_rooms, set_setting, get_setting, delete_setting
+    is_admin,
+    get_rooms,
+    get_room,
+    add_room,
+    update_room,
+    delete_room,
+    get_hotel,
+    update_hotel,
+    get_channels,
+    add_channel as db_add_channel,
+    remove_channel,
+    get_post_channel,
+    set_post_channel,
+    clear_post_channel,
+    add_admin as db_add_admin,
+    remove_admin as db_remove_admin,
+    get_admins,
+    get_user_count,
+    get_orders,
+    get_order,
+    update_order,
+    get_all_users,
+    get_daily_stats,
+    get_monthly_stats,
+    log_activity,
+    find_available_rooms,
+    set_setting,
+    get_setting,
+    delete_setting,
+    get_room_photos,
+    add_room_photo,
+    add_room_photos_bulk,
+    remove_room_photo,
+    clear_room_photos,
+    get_hotel_location,
+    update_hotel_location,
 )
 from bot.keyboards.keyboards import admin_main_kb
 
@@ -28,6 +66,7 @@ router = Router()
 
 START_MEDIA_GROUPS: dict[tuple[int, str], dict] = {}
 POST_MEDIA_GROUPS: dict[tuple[int, str], dict] = {}
+ROOM_PHOTO_GROUPS: dict[tuple, dict] = {}
 
 
 def format_price(price: int) -> str:
@@ -66,6 +105,14 @@ class AvailabilityState(StatesGroup):
     waiting = State()
 
 
+class RoomPhotoState(StatesGroup):
+    waiting = State()
+
+
+class HotelLocationState(StatesGroup):
+    waiting = State()
+
+
 class StartMessageState(StatesGroup):
     waiting = State()
 
@@ -82,27 +129,82 @@ async def admin_panel(message: Message, state: FSMContext):
     user_id = str(message.from_user.id)
     if not await is_admin(user_id, os.getenv("SUPER_ADMIN_ID")):
         return
-    
+
     ADMIN_IN_ADMIN_MODE.add(user_id)
     await state.clear()
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📊 Statistika", callback_data="stats_refresh")],
-        [InlineKeyboardButton(text="🏠 Xonalar", callback_data="admin_rooms_list"),
-         InlineKeyboardButton(text="🏨 Mehmonxona", callback_data="hotel_info")],
-        [InlineKeyboardButton(text="📢 Kanallar", callback_data="channels_manage"),
-         InlineKeyboardButton(text="📝 Post", callback_data="post_create")],
-        [InlineKeyboardButton(text="🟢 Bo'sh xonalar", callback_data="available_rooms")],
-        [InlineKeyboardButton(text="✉️ Start xabar", callback_data="start_message")],
-        [InlineKeyboardButton(text="👥 Adminlar", callback_data="admins_list")],
-        [InlineKeyboardButton(text="🚪 Chiqish", callback_data="admin_logout")],
-    ])
-    
-    await message.answer(
-        "⚙️ <b>Admin Panel - Marco Polo Hotel</b>\n\n"
-        "Xush kelibsiz, Admin!",
-        reply_markup=keyboard
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Buyurtmalar", callback_data="orders_menu")],
+            [InlineKeyboardButton(text="📊 Statistika", callback_data="stats_refresh")],
+            [
+                InlineKeyboardButton(
+                    text="🏠 Xonalar", callback_data="admin_rooms_list"
+                ),
+                InlineKeyboardButton(text="🏨 Mehmonxona", callback_data="hotel_info"),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📢 Kanallar", callback_data="channels_manage"
+                ),
+                InlineKeyboardButton(text="📝 Post", callback_data="post_create"),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🟢 Bo'sh xonalar", callback_data="available_rooms"
+                )
+            ],
+            [InlineKeyboardButton(text="✉️ Start xabar", callback_data="start_message")],
+            [InlineKeyboardButton(text="👥 Adminlar", callback_data="admins_list")],
+            [InlineKeyboardButton(text="🚪 Chiqish", callback_data="admin_logout")],
+        ]
     )
+
+    await message.answer(
+        "⚙️ <b>Admin Panel - Marco Polo Hotel</b>\n\nXush kelibsiz, Admin!",
+        reply_markup=keyboard,
+    )
+
+
+@router.message(Command("location"))
+async def set_location_command(message: Message):
+    user_id = str(message.from_user.id)
+    if not await is_admin(user_id, os.getenv("SUPER_ADMIN_ID")):
+        return
+
+    text = (
+        message.text.replace("/location", "")
+        .replace("@Marcopolo_hotel_bot", "")
+        .strip()
+    )
+
+    if not text:
+        await message.answer(
+            "📍 Lokatsiya sozlash uchun:\n"
+            "/location 41.2995 69.2401\n\n"
+            "Yoki Telegram orqali lokatsiya yuboring."
+        )
+        return
+
+    parts = text.split()
+    if len(parts) >= 2:
+        try:
+            lat = float(parts[0])
+            lng = float(parts[1])
+            await update_hotel_location(lat, lng)
+            await message.answer(f"✅ Lokatsiya yangilandi!\n\n📍 {lat}, {lng}")
+            try:
+                await message.answer_location(lat, lng)
+            except Exception:
+                pass
+        except ValueError:
+            await message.answer(
+                "❌ Noto'g'ri format. Misol: /location 41.2995 69.2401"
+            )
+    else:
+        await message.answer(
+            "❌ Iltimos, kenglik va uzunlikni yuboring.\nMisol: /location 41.2995 69.2401"
+        )
 
 
 @router.callback_query(F.data == "admin_logout")
@@ -110,13 +212,18 @@ async def admin_logout(callback: CallbackQuery, state: FSMContext):
     user_id = str(callback.from_user.id)
     ADMIN_IN_ADMIN_MODE.discard(user_id)
     await state.clear()
-    
+
     await callback.message.edit_text(
-        "✅ Admin rejmidan chiqdingiz!\n\n"
-        "Bot asosiy holatga qaytdi.",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📋 Asosiy menyu", callback_data="back_main")]
-        ])
+        "✅ Admin rejmidan chiqdingiz!\n\nBot asosiy holatga qaytdi.",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="📋 Asosiy menyu", callback_data="back_main"
+                    )
+                ]
+            ]
+        ),
     )
 
 
@@ -124,13 +231,13 @@ async def admin_logout(callback: CallbackQuery, state: FSMContext):
 async def show_stats(callback: CallbackQuery):
     if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
-    
+
     rooms = await get_rooms()
     active_rooms = sum(1 for r in rooms if r.get("active"))
     channels = await get_channels()
     daily = await get_daily_stats()
     monthly = await get_monthly_stats()
-    
+
     await callback.message.edit_text(
         f"""
 📊 <b>Statistika:</b>
@@ -138,11 +245,11 @@ async def show_stats(callback: CallbackQuery):
 ━━━━━━━━━━━━━━━━━━
 👥 Foydalanuvchilar:
    • Jami: <b>{await get_user_count()}</b> ta
-   • Bugun: +{daily['new_users']} ta
+   • Bugun: +{daily["new_users"]} ta
 
 📋 Buyurtmalar:
-   • Jami: <b>{monthly['total_orders']}</b> ta
-   • Bugun: +{daily['new_orders']} ta
+   • Jami: <b>{monthly["total_orders"]}</b> ta
+   • Bugun: +{daily["new_orders"]} ta
 
 🏠 Xonalar: <b>{active_rooms}/{len(rooms)}</b> ta
 
@@ -150,14 +257,16 @@ async def show_stats(callback: CallbackQuery):
 
 💬 Suhbatlar: <b>{active_users()}</b> ta
 
-💰 Daromad: <b>{format_price(monthly['revenue'])} so'm</b>
+💰 Daromad: <b>{format_price(monthly["revenue"])} so'm</b>
 
 👮 Adminlar: <b>{len(await get_admins())}</b> ta
 ━━━━━━━━━━━━━━━━━━
 """,
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")]
-        ])
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")]
+            ]
+        ),
     )
 
 
@@ -165,14 +274,22 @@ async def show_stats(callback: CallbackQuery):
 async def orders_menu(callback: CallbackQuery):
     if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⏳ Kutilayotgan", callback_data="orders_pending"),
-         InlineKeyboardButton(text="✅ Tasdiqlangan", callback_data="orders_confirmed")],
-        [InlineKeyboardButton(text="📋 Barchasi", callback_data="orders_all")],
-        [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")],
-    ])
-    
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="⏳ Kutilayotgan", callback_data="orders_pending"
+                ),
+                InlineKeyboardButton(
+                    text="✅ Tasdiqlangan", callback_data="orders_confirmed"
+                ),
+            ],
+            [InlineKeyboardButton(text="📋 Barchasi", callback_data="orders_all")],
+            [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")],
+        ]
+    )
+
     await callback.message.edit_text("📋 <b>Buyurtmalar:</b>", reply_markup=keyboard)
 
 
@@ -180,46 +297,61 @@ async def orders_menu(callback: CallbackQuery):
 async def orders_list(callback: CallbackQuery):
     if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
-    
+
     status_map = {
         "orders_pending": "pending",
         "orders_confirmed": "confirmed",
-        "orders_all": None
+        "orders_all": None,
     }
-    
+
     status = status_map.get(callback.data)
     orders = await get_orders(status)
-    
+
     if not orders:
         await callback.message.edit_text(
             "📋 Buyurtmalar yo'q",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="◀️ Orqaga", callback_data="orders_menu")]
-            ])
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="◀️ Orqaga", callback_data="orders_menu")]
+                ]
+            ),
         )
         return
-    
+
     buttons = []
     for order in orders[:15]:
-        status_emoji = {"pending": "⏳", "confirmed": "✅", "completed": "🏁", "cancelled": "❌"}.get(order.get('status', 'pending'), "📋")
-        source_emoji = "📱" if order.get('source') == 'instagram' else "💬"
-        order_id_short = order.get('id', 'N/A')[-8:]
-        
-        buttons.append([InlineKeyboardButton(
-            text=f"{status_emoji} {source_emoji} {order.get('room_name', 'Xona')} - {order.get('phone', 'N/A')}",
-            callback_data=f"view_order_{order.get('id', '')}"
-        )])
-    
+        status_emoji = {
+            "pending": "⏳",
+            "confirmed": "✅",
+            "completed": "🏁",
+            "cancelled": "❌",
+        }.get(order.get("status", "pending"), "📋")
+        source_emoji = "📱" if order.get("source") == "instagram" else "💬"
+        order_id_short = order.get("id", "N/A")[-8:]
+
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    text=f"{status_emoji} {source_emoji} {order.get('room_name', 'Xona')} - {order.get('phone', 'N/A')}",
+                    callback_data=f"view_order_{order.get('id', '')}",
+                )
+            ]
+        )
+
     buttons.append([InlineKeyboardButton(text="◀️ Orqaga", callback_data="orders_menu")])
-    
-    status_name = {"pending": "Kutilayotgan", "confirmed": "Tasdiqlangan", "orders_all": "Barcha"}.get(callback.data, "Buyurtmalar")
-    
+
+    status_name = {
+        "pending": "Kutilayotgan",
+        "confirmed": "Tasdiqlangan",
+        "orders_all": "Barcha",
+    }.get(callback.data, "Buyurtmalar")
+
     try:
         await callback.message.edit_text(
             f"📋 <b>{status_name} buyurtmalar:</b>\n\n"
             "Buyurtmani bosib, tasdiqlashingiz yoki bekor qilishingiz mumkin.\n"
             "📱 = Instagram | 💬 = Telegram",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
         )
     except Exception:
         await callback.answer("Xatolik yuz berdi", show_alert=True)
@@ -229,54 +361,79 @@ async def orders_list(callback: CallbackQuery):
 async def view_order(callback: CallbackQuery, bot: Bot):
     if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
-    
+
     order_id = callback.data.replace("view_order_", "")
     order = await get_order(order_id)
-    
+
     if not order:
         await callback.answer("❌ Buyurtma topilmadi", show_alert=True)
         return
-    
-    status_text = {"pending": "⏳ Kutilmoqda", "confirmed": "✅ Tasdiqlangan", "completed": "🏁 Tugallangan", "cancelled": "❌ Bekor qilingan"}.get(order.get('status', 'pending'), "📋")
-    source_text = "📱 Instagram" if order.get('source') == 'instagram' else "💬 Telegram"
-    
-    phone = order.get('phone', '')
-    phone_clean = phone.replace('tel:', '').strip() if phone else ''
-    
+
+    status_text = {
+        "pending": "⏳ Kutilmoqda",
+        "confirmed": "✅ Tasdiqlangan",
+        "completed": "🏁 Tugallangan",
+        "cancelled": "❌ Bekor qilingan",
+    }.get(order.get("status", "pending"), "📋")
+    source_text = (
+        "📱 Instagram" if order.get("source") == "instagram" else "💬 Telegram"
+    )
+
+    phone = order.get("phone", "")
+    phone_clean = phone.replace("tel:", "").strip() if phone else ""
+
     text = f"""
-📋 <b>Buyurtma #{order.get('id', 'N/A')}</b>
+📋 <b>Buyurtma #{order.get("id", "N/A")}</b>
 
 {status_text} | {source_text}
 
 ━━━━━━━━━━━━━━━━━━━━━━
-🏨 Xona: <b>{order.get('room_name', 'N/A')}</b>
-📅 Kelish: {order.get('check_in', 'N/A')}
-📅 Ketish: {order.get('check_out', 'N/A')}
-👥 Mehmonlar: {order.get('guests', 1)} kishi
-💰 Narxi: <b>{format_price(order.get('total_price', 0))} so'm</b>
+🏨 Xona: <b>{order.get("room_name", "N/A")}</b>
+📅 Kelish: {order.get("check_in", "N/A")}
+📅 Ketish: {order.get("check_out", "N/A")}
+👥 Mehmonlar: {order.get("guests", 1)} kishi
+💰 Narxi: <b>{format_price(order.get("total_price", 0))} so'm</b>
 ━━━━━━━━━━━━━━━━━━━━━━
-👤 Ism: {order.get('name', 'N/A')}
+👤 Ism: {order.get("name", "N/A")}
 📞 Telefon: {phone_clean}
-📝 Manba: {order.get('source', 'N/A')}
+📝 Manba: {order.get("source", "N/A")}
 ━━━━━━━━━━━━━━━━━━━━━━
 """
-    
+
     buttons = []
-    if order.get('status') == 'pending':
-        buttons.append([
-            InlineKeyboardButton(text="✅ Tasdiqlash", callback_data=f"order_confirm_{order_id}"),
-            InlineKeyboardButton(text="❌ Bekor qilish", callback_data=f"order_cancel_{order_id}")
-        ])
-    elif order.get('status') == 'confirmed':
-        buttons.append([InlineKeyboardButton(text="🏁 Tugallangan", callback_data=f"order_complete_{order_id}")])
-    
-    if phone_clean and phone_clean.startswith('+'):
-        buttons.append([InlineKeyboardButton(text="📞 Qo'ng'iroq", url=f"tel:{phone_clean}")])
-    
-    buttons.append([InlineKeyboardButton(text="◀️ Orqaga", callback_data="orders_pending")])
-    
+    if order.get("status") == "pending":
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    text="✅ Tasdiqlash", callback_data=f"order_confirm_{order_id}"
+                ),
+                InlineKeyboardButton(
+                    text="❌ Bekor qilish", callback_data=f"order_cancel_{order_id}"
+                ),
+            ]
+        )
+    elif order.get("status") == "confirmed":
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    text="🏁 Tugallangan", callback_data=f"order_complete_{order_id}"
+                )
+            ]
+        )
+
+    if phone_clean and phone_clean.startswith("+"):
+        buttons.append(
+            [InlineKeyboardButton(text="📞 Qo'ng'iroq", url=f"tel:{phone_clean}")]
+        )
+
+    buttons.append(
+        [InlineKeyboardButton(text="◀️ Orqaga", callback_data="orders_pending")]
+    )
+
     try:
-        await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+        await callback.message.edit_text(
+            text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+        )
     except Exception:
         await callback.answer("Xatolik yuz berdi", show_alert=True)
 
@@ -285,30 +442,39 @@ async def view_order(callback: CallbackQuery, bot: Bot):
 async def order_complete(callback: CallbackQuery):
     if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
-    
+
     order_id = callback.data.replace("order_complete_", "")
     await update_order(order_id, "status", "completed")
-    
+
     await callback.answer("✅ Tugallandi!", show_alert=True)
-    await callback.message.edit_text("✅ Buyurtma tugallangan deb belgilandi!", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="◀️ Orqaga", callback_data="orders_confirmed")]
-    ]))
+    await callback.message.edit_text(
+        "✅ Buyurtma tugallangan deb belgilandi!",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="◀️ Orqaga", callback_data="orders_confirmed"
+                    )
+                ]
+            ]
+        ),
+    )
 
 
 @router.callback_query(F.data.startswith("order_confirm_"))
 async def order_confirm(callback: CallbackQuery, bot: Bot):
     if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
-    
+
     order_id = callback.data.replace("order_confirm_", "")
     await update_order(order_id, "status", "confirmed")
-    
+
     order = await get_order(order_id)
     hotel = await get_hotel()
-    
+
     if order:
-        user_id = order.get('user_id', '')
-        if order.get('source') == 'instagram':
+        user_id = order.get("user_id", "")
+        if order.get("source") == "instagram":
             pass
         else:
             try:
@@ -318,50 +484,70 @@ async def order_confirm(callback: CallbackQuery, bot: Bot):
                     f"🏨 {order.get('room_name')}\n"
                     f"📅 {order.get('check_in')} → {order.get('check_out')}\n"
                     f"📞 {hotel.get('phone', '+998773397171')}\n\n"
-                    f"Xona tayyor bo'lganda siz bilan bog'lanamiz!"
+                    f"Xona tayyor bo'lganda siz bilan bog'lanamiz!",
                 )
-            except:
+            except Exception:
                 pass
-    
+
     await callback.answer("✅ Tasdiqlandi!", show_alert=True)
-    await callback.message.edit_text("✅ Buyurtma tasdiqlandi!", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="◀️ Kutilayotganlarga", callback_data="orders_pending"),
-         InlineKeyboardButton(text="📋 Barchasi", callback_data="orders_all")]
-    ]))
+    await callback.message.edit_text(
+        "✅ Buyurtma tasdiqlandi!",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="◀️ Kutilayotganlarga", callback_data="orders_pending"
+                    ),
+                    InlineKeyboardButton(
+                        text="📋 Barchasi", callback_data="orders_all"
+                    ),
+                ]
+            ]
+        ),
+    )
 
 
 @router.callback_query(F.data.startswith("order_cancel_"))
 async def order_cancel(callback: CallbackQuery):
     if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
-    
+
     order_id = callback.data.replace("order_cancel_", "")
     await update_order(order_id, "status", "cancelled")
-    
+
     await callback.answer("❌ Bekor qilindi!", show_alert=True)
-    await callback.message.edit_text("❌ Buyurtma bekor qilindi!", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="◀️ Orqaga", callback_data="orders_menu")]
-    ]))
+    await callback.message.edit_text(
+        "❌ Buyurtma bekor qilindi!",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Orqaga", callback_data="orders_menu")]
+            ]
+        ),
+    )
 
 
 @router.callback_query(F.data == "users_menu")
 async def users_menu(callback: CallbackQuery):
     if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
-    
+
     users = await get_all_users()
     count = len(users)
-    
+
     text = f"👥 <b>Foydalanuvchilar:</b>\n\nJami: <b>{count}</b> ta\n\n"
-    
+
     for user in users[:10]:
-        text += f"• {user.get('first_name', 'N/A')} (ID: {user.get('user_id', 'N/A')})\n"
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📤 Broadcast", callback_data="broadcast_menu")],
-        [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")]
-    ])
-    
+        text += (
+            f"• {user.get('first_name', 'N/A')} (ID: {user.get('user_id', 'N/A')})\n"
+        )
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="📤 Broadcast", callback_data="broadcast_menu")],
+            [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")],
+        ]
+    )
+
     await callback.message.edit_text(text, reply_markup=keyboard)
 
 
@@ -369,12 +555,11 @@ async def users_menu(callback: CallbackQuery):
 async def broadcast_menu(callback: CallbackQuery, state: FSMContext):
     if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
-    
+
     await state.set_state(BroadcastState.message)
     await state.update_data(step="broadcast")
     await callback.message.edit_text(
-        "📤 <b>Broadcast xabar yuborish</b>\n\n"
-        "Xabarni yozing:"
+        "📤 <b>Broadcast xabar yuborish</b>\n\nXabarni yozing:"
     )
 
 
@@ -383,26 +568,26 @@ async def broadcast_send(message: Message, state: FSMContext, bot: Bot):
     if not await is_admin(str(message.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         await state.clear()
         return
-    
+
     data = await state.get_data()
     if data.get("step") != "broadcast":
         await state.clear()
         return
-    
+
     await state.clear()
     users = await get_all_users()
     sent = 0
-    
+
     for user in users:
         try:
             await bot.send_message(
-                int(user.get('user_id', 0)),
-                f"📢 <b>Marco Polo Hotel dan:</b>\n\n{message.text}"
+                int(user.get("user_id", 0)),
+                f"📢 <b>Marco Polo Hotel dan:</b>\n\n{message.text}",
             )
             sent += 1
-        except:
+        except Exception:
             pass
-    
+
     await message.answer(
         f"✅ <b>Yuborildi!</b>\n\n{len(users)} ta foydalanuvchidan {sent} tasiga yuborildi."
     )
@@ -412,19 +597,34 @@ async def broadcast_send(message: Message, state: FSMContext, bot: Bot):
 async def admin_back(callback: CallbackQuery):
     if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📊 Statistika", callback_data="stats_refresh")],
-        [InlineKeyboardButton(text="🏠 Xonalar", callback_data="admin_rooms_list"),
-         InlineKeyboardButton(text="🏨 Mehmonxona", callback_data="hotel_info")],
-        [InlineKeyboardButton(text="📢 Kanallar", callback_data="channels_manage"),
-         InlineKeyboardButton(text="📝 Post", callback_data="post_create")],
-        [InlineKeyboardButton(text="🟢 Bo'sh xonalar", callback_data="available_rooms")],
-        [InlineKeyboardButton(text="✉️ Start xabar", callback_data="start_message")],
-        [InlineKeyboardButton(text="👥 Adminlar", callback_data="admins_list")],
-        [InlineKeyboardButton(text="🚪 Chiqish", callback_data="admin_logout")],
-    ])
-    
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Buyurtmalar", callback_data="orders_menu")],
+            [InlineKeyboardButton(text="📊 Statistika", callback_data="stats_refresh")],
+            [
+                InlineKeyboardButton(
+                    text="🏠 Xonalar", callback_data="admin_rooms_list"
+                ),
+                InlineKeyboardButton(text="🏨 Mehmonxona", callback_data="hotel_info"),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📢 Kanallar", callback_data="channels_manage"
+                ),
+                InlineKeyboardButton(text="📝 Post", callback_data="post_create"),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🟢 Bo'sh xonalar", callback_data="available_rooms"
+                )
+            ],
+            [InlineKeyboardButton(text="✉️ Start xabar", callback_data="start_message")],
+            [InlineKeyboardButton(text="👥 Adminlar", callback_data="admins_list")],
+            [InlineKeyboardButton(text="🚪 Chiqish", callback_data="admin_logout")],
+        ]
+    )
+
     await callback.message.edit_text("⚙️ <b>Admin Panel</b>", reply_markup=keyboard)
 
 
@@ -432,22 +632,28 @@ async def admin_back(callback: CallbackQuery):
 async def rooms_manage(callback: CallbackQuery):
     if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
-    
+
     rooms = await get_rooms()
     buttons = []
     for room in rooms:
         status = "✅" if room.get("active") else "❌"
-        buttons.append([InlineKeyboardButton(
-            text=f"{status} {room.get('name', 'Xona')} - {format_price(room.get('price', 0))} so'm",
-            callback_data=f"admin_room_{room.get('id', '')}"
-        )])
-    
-    buttons.append([InlineKeyboardButton(text="➕ Yangi xona", callback_data="add_room_start")])
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    text=f"{status} {room.get('name', 'Xona')} - {format_price(room.get('price', 0))} so'm",
+                    callback_data=f"admin_room_{room.get('id', '')}",
+                )
+            ]
+        )
+
+    buttons.append(
+        [InlineKeyboardButton(text="➕ Yangi xona", callback_data="add_room_start")]
+    )
     buttons.append([InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")])
-    
+
     await callback.message.edit_text(
         "🏠 <b>Xonalar boshqaruvi:</b>",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
     )
 
 
@@ -455,26 +661,56 @@ async def rooms_manage(callback: CallbackQuery):
 async def room_detail_admin(callback: CallbackQuery):
     if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
-    
+
     room_id = callback.data.replace("admin_room_", "")
     room = await get_room(room_id)
-    
+
     if not room:
         await callback.answer("❌ Xona topilmadi")
         return
 
     status = "✅ Faol" if room.get("active") else "❌ Nofaol"
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✏️ Narx", callback_data=f"edit_room_price_{room_id}"),
-         InlineKeyboardButton(text="📝 Tavsif", callback_data=f"edit_room_desc_{room_id}")],
-        [InlineKeyboardButton(text="🧮 Xona soni", callback_data=f"edit_room_qty_{room_id}"),
-         InlineKeyboardButton(text="🔢 Raqamlar", callback_data=f"edit_room_numbers_{room_id}")],
-        [InlineKeyboardButton(text="❌ O'chirish" if room.get("active") else "✅ Yoqish", 
-                             callback_data=f"toggle_room_{room_id}")],
-        [InlineKeyboardButton(text="🗑 Xonani o'chirish", callback_data=f"delete_room_{room_id}")],
-        [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_rooms_list")],
-    ])
+
+    photos = await get_room_photos(room_id)
+    photo_count = len(photos)
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✏️ Narx", callback_data=f"edit_room_price_{room_id}"
+                ),
+                InlineKeyboardButton(
+                    text="📝 Tavsif", callback_data=f"edit_room_desc_{room_id}"
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🧮 Xona soni", callback_data=f"edit_room_qty_{room_id}"
+                ),
+                InlineKeyboardButton(
+                    text="🔢 Raqamlar", callback_data=f"edit_room_numbers_{room_id}"
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text=f"📸 Rasmlar ({photo_count} ta)",
+                    callback_data=f"room_photos_{room_id}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="❌ O'chirish" if room.get("active") else "✅ Yoqish",
+                    callback_data=f"toggle_room_{room_id}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🗑 Xonani o'chirish", callback_data=f"delete_room_{room_id}"
+                )
+            ],
+            [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_rooms_list")],
+        ]
+    )
     await callback.message.edit_text(
         f"🏠 <b>{room.get('name')}</b>\n\n"
         f"💰 Narx: {format_price(room.get('price', 0))} so'm/kun\n"
@@ -482,8 +718,9 @@ async def room_detail_admin(callback: CallbackQuery):
         f"👥 Sig'im: {room.get('capacity', 0)} kishi\n"
         f"🧮 Soni: {room.get('quantity', 1)} ta\n"
         f"🔢 Raqamlar: {room.get('room_numbers', '')}\n"
+        f"📸 Rasmlar: {photo_count} ta\n"
         f"📌 Holat: {status}",
-        reply_markup=keyboard
+        reply_markup=keyboard,
     )
 
 
@@ -491,21 +728,27 @@ async def room_detail_admin(callback: CallbackQuery):
 async def toggle_room(callback: CallbackQuery):
     if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
-    
+
     room_id = callback.data.replace("toggle_room_", "")
     room = await get_room(room_id)
     new_status = 0 if room.get("active") else 1
     await update_room(room_id, "active", new_status)
-    
+
     await callback.answer("✅ Holat o'zgartirildi!")
     await callback.message.edit_text(
         f"🏠 <b>{room.get('name')}</b>\n\n"
         f"💰 Narx: {format_price(room.get('price', 0))} so'm/kun\n"
         f"📋 Tavsif: {room.get('description', '')}\n"
         f"📌 Holat: {'✅ Faol' if new_status else '❌ Nofaol'}",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_rooms_list")]
-        ])
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="◀️ Orqaga", callback_data="admin_rooms_list"
+                    )
+                ]
+            ]
+        ),
     )
 
 
@@ -513,18 +756,26 @@ async def toggle_room(callback: CallbackQuery):
 async def delete_room_confirm(callback: CallbackQuery):
     if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
-    
+
     room_id = callback.data.replace("delete_room_", "")
     room = await get_room(room_id)
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Ha, o'chirish", callback_data=f"confirm_delete_{room_id}"),
-         InlineKeyboardButton(text="❌ Yo'q", callback_data=f"admin_room_{room_id}")],
-    ])
-    
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Ha, o'chirish", callback_data=f"confirm_delete_{room_id}"
+                ),
+                InlineKeyboardButton(
+                    text="❌ Yo'q", callback_data=f"admin_room_{room_id}"
+                ),
+            ],
+        ]
+    )
+
     await callback.message.edit_text(
         f"🗑 <b>{room.get('name')}</b>ni o'chirishni tasdiqlaysizmi?",
-        reply_markup=keyboard
+        reply_markup=keyboard,
     )
 
 
@@ -532,34 +783,41 @@ async def delete_room_confirm(callback: CallbackQuery):
 async def confirm_delete(callback: CallbackQuery):
     if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
-    
+
     room_id = callback.data.replace("confirm_delete_", "")
     await delete_room(room_id)
-    
+
     await callback.answer("✅ Xona o'chirildi!")
-    
+
     rooms = await get_rooms()
     buttons = []
     for room in rooms:
         status = "✅" if room.get("active") else "❌"
-        buttons.append([InlineKeyboardButton(
-            text=f"{status} {room.get('name', 'Xona')}",
-            callback_data=f"admin_room_{room.get('id', '')}"
-        )])
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    text=f"{status} {room.get('name', 'Xona')}",
+                    callback_data=f"admin_room_{room.get('id', '')}",
+                )
+            ]
+        )
     buttons.append([InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")])
-    
-    await callback.message.edit_text("✅ Xona o'chirildi!", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+
+    await callback.message.edit_text(
+        "✅ Xona o'chirildi!",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+    )
 
 
 @router.callback_query(F.data.startswith("edit_room_price_"))
 async def edit_room_price(callback: CallbackQuery, state: FSMContext):
     if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
-    
+
     room_id = callback.data.replace("edit_room_price_", "")
     await state.set_state(RoomEditState.waiting)
     await state.update_data(room_id=room_id, field="price")
-    
+
     await callback.message.edit_text("💰 Yangi narxni yuboring (faqat raqam):")
 
 
@@ -567,24 +825,23 @@ async def edit_room_price(callback: CallbackQuery, state: FSMContext):
 async def edit_room_desc(callback: CallbackQuery, state: FSMContext):
     if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
-    
+
     room_id = callback.data.replace("edit_room_desc_", "")
     await state.set_state(RoomEditState.waiting)
     await state.update_data(room_id=room_id, field="description")
-    
-    await callback.message.edit_text("📝 Yangi tavsifni yuboring:")
 
+    await callback.message.edit_text("📝 Yangi tavsifni yuboring:")
 
 
 @router.callback_query(F.data.startswith("edit_room_qty_"))
 async def edit_room_qty(callback: CallbackQuery, state: FSMContext):
     if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
-    
+
     room_id = callback.data.replace("edit_room_qty_", "")
     await state.set_state(RoomEditState.waiting)
     await state.update_data(room_id=room_id, field="quantity")
-    
+
     await callback.message.edit_text("🧮 Xona sonini yuboring (raqam):")
 
 
@@ -592,71 +849,81 @@ async def edit_room_qty(callback: CallbackQuery, state: FSMContext):
 async def edit_room_numbers(callback: CallbackQuery, state: FSMContext):
     if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
-    
+
     room_id = callback.data.replace("edit_room_numbers_", "")
     await state.set_state(RoomEditState.waiting)
     await state.update_data(room_id=room_id, field="room_numbers")
-    
-    await callback.message.edit_text("🔢 Xona raqamlarini yuboring (masalan: 101,102,103). Bo'sh qoldirish mumkin.")
+
+    await callback.message.edit_text(
+        "🔢 Xona raqamlarini yuboring (masalan: 101,102,103). Bo'sh qoldirish mumkin."
+    )
+
+
 @router.message(RoomEditState.waiting)
 async def save_room_edit(message: Message, state: FSMContext):
     if not await is_admin(str(message.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         await state.clear()
         return
-    
+
     data = await state.get_data()
     step = data.get("step")
     room_id = data.get("room_id")
     field = data.get("field")
-    
+
     if step == "room_name":
         room_name = message.text.strip()
         await state.update_data(room_name=room_name, step="room_price")
         await message.answer("💰 Narxini yuboring (faqat raqam):")
-        
+
     elif step == "room_price":
         try:
             price = int(message.text.strip().replace(" ", "").replace(",", ""))
             await state.update_data(price=price, step="room_desc")
             await message.answer("📝 Tavsifni yuboring:")
-        except:
+        except Exception:
             await message.answer("❌ Faqat raqam!")
-            
+
     elif step == "room_desc":
         description = message.text.strip()
         await state.update_data(description=description, step="room_capacity")
         await message.answer("👥 Sig'imni yuboring (kishi soni):")
-        
+
     elif step == "room_capacity":
         try:
             capacity = int(message.text.strip())
             await state.update_data(capacity=capacity, step="room_quantity")
             await message.answer("🧮 Xona sonini yuboring (raqam):")
-        except:
+        except Exception:
             await message.answer("❌ Faqat raqam!")
 
     elif step == "room_quantity":
         try:
             quantity = int(message.text.strip())
             await state.update_data(quantity=quantity, step="room_numbers")
-            await message.answer("🔢 Xona raqamlarini yuboring (masalan: 101,102,103). Bo'sh qoldirish mumkin.")
-        except:
+            await message.answer(
+                "🔢 Xona raqamlarini yuboring (masalan: 101,102,103). Bo'sh qoldirish mumkin."
+            )
+        except Exception:
             await message.answer("❌ Faqat raqam!")
 
     elif step == "room_numbers":
         numbers = (message.text or "").strip()
         data = await state.get_data()
         from uuid import uuid4
+
         room_id_new = str(uuid4().hex[:8])
-        await add_room(room_id_new, {
-            'name': data.get('room_name', 'Yangi xona'),
-            'price': data.get('price', 200000),
-            'description': data.get('description', ''),
-            'capacity': data.get('capacity', 2),
-            'quantity': data.get('quantity', 1),
-            'room_numbers': numbers,
-            'active': 1
-        })
+        await add_room(
+            room_id_new,
+            {
+                "name": data.get("room_name", "Yangi xona"),
+                "price": data.get("price", 200000),
+                "description": data.get("description", ""),
+                "capacity": data.get("capacity", 2),
+                "quantity": data.get("quantity", 1),
+                "room_numbers": numbers,
+                "active": 1,
+            },
+        )
         await state.clear()
         await message.answer("✅ Xona qo'shildi!")
     elif room_id and field:
@@ -664,13 +931,13 @@ async def save_room_edit(message: Message, state: FSMContext):
         if field == "price":
             try:
                 value = int(value.replace(" ", "").replace(",", ""))
-            except:
+            except Exception:
                 await message.answer("❌ Faqat raqam!")
                 return
         if field == "quantity":
             try:
                 value = int(value.replace(" ", "").replace(",", ""))
-            except:
+            except Exception:
                 await message.answer("❌ Faqat raqam!")
                 return
         await update_room(room_id, field, value)
@@ -684,7 +951,7 @@ async def save_room_edit(message: Message, state: FSMContext):
 async def add_room_start(callback: CallbackQuery, state: FSMContext):
     if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
-    
+
     await state.set_state(RoomEditState.waiting)
     await state.update_data(step="room_name")
     await callback.message.edit_text("➕ Yangi xona qo'shish\n\nXona nomini yuboring:")
@@ -694,35 +961,81 @@ async def add_room_start(callback: CallbackQuery, state: FSMContext):
 async def hotel_info(callback: CallbackQuery):
     if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
-    
-    hotel = await get_hotel()
-    await callback.message.edit_text(
-        f"""
-🏨 <b>Mehmonxona:</b>
 
-Nomi: {hotel.get('name', 'Marco Polo Hotel')}
-Manzil: {hotel.get('address', '')}
-Telefon: {hotel.get('phone', '')}
-Telegram: {hotel.get('telegram', '')}
-""",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✏️ Nom", callback_data="edit_hotel_name"),
-             InlineKeyboardButton(text="📍 Manzil", callback_data="edit_hotel_address")],
-            [InlineKeyboardButton(text="📞 Telefon", callback_data="edit_hotel_phone")],
-            [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")]
-        ])
+    hotel = await get_hotel()
+    loc = await get_hotel_location()
+
+    lines = [
+        f"🏨 <b>Mehmonxona ma'lumotlari:</b>\n",
+        f"━━━━━━━━━━━━━━━━━━━━━━━",
+        f"📛 Nomi: {hotel.get('name', 'Marco Polo Hotel')}",
+        f"📍 Manzil: {hotel.get('address', 'Belgilanmagan')}",
+        f"📞 Telefon: {hotel.get('phone', 'Belgilanmagan')}",
+        f"💬 Telegram: {hotel.get('telegram', 'Belgilanmagan')}",
+        f"━━━━━━━━━━━━━━━━━━━━━━━",
+    ]
+
+    if loc:
+        lines.append(f"🗺 Lokatsiya: ✅ ({loc[0]:.6f}, {loc[1]:.6f})")
+    else:
+        lines.append(f"🗺 Lokatsiya: ❌ Belgilanmagan")
+
+    await callback.message.edit_text(
+        "\n".join(lines),
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="✏️ Nom", callback_data="edit_hotel_name"),
+                    InlineKeyboardButton(
+                        text="📍 Manzil", callback_data="edit_hotel_address"
+                    ),
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="📞 Telefon", callback_data="edit_hotel_phone"
+                    ),
+                    InlineKeyboardButton(
+                        text="💬 Telegram", callback_data="edit_hotel_telegram"
+                    ),
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="🗺 Lokatsiya", callback_data="edit_hotel_location"
+                    ),
+                    InlineKeyboardButton(
+                        text="📷 Instagram", callback_data="edit_hotel_instagram"
+                    ),
+                ],
+                [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")],
+            ]
+        ),
     )
+
+    if loc:
+        try:
+            await callback.message.answer_location(loc[0], loc[1])
+        except Exception:
+            pass
 
 
 @router.callback_query(F.data.startswith("edit_hotel_"))
 async def edit_hotel(callback: CallbackQuery, state: FSMContext):
     if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
-    
+
     field = callback.data.replace("edit_hotel_", "")
+    field_names = {
+        "name": "Mehmonxona nomi",
+        "address": "Manzil matni",
+        "phone": "Telefon raqam",
+        "telegram": "Telegram username",
+        "instagram": "Instagram username",
+    }
     await state.set_state(HotelEditState.waiting)
     await state.update_data(hotel_field=field)
-    await callback.message.edit_text(f"Yangi {field}ni yuboring:")
+    await callback.message.edit_text(
+        f"Yangi {field_names.get(field, field)}ni yuboring:"
+    )
 
 
 @router.message(HotelEditState.waiting)
@@ -730,13 +1043,13 @@ async def save_hotel_edit(message: Message, state: FSMContext):
     if not await is_admin(str(message.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         await state.clear()
         return
-    
+
     data = await state.get_data()
     field = data.get("hotel_field")
-    
+
     if field:
         await update_hotel(field, message.text.strip())
-    
+
     await state.clear()
     await message.answer("✅ Yangilandi!")
 
@@ -745,10 +1058,10 @@ async def save_hotel_edit(message: Message, state: FSMContext):
 async def channels_manage(callback: CallbackQuery):
     if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
-    
+
     channels = await get_channels()
     post_ch = await get_post_channel()
-    
+
     text = "📢 <b>Kanallar:</b>\n\n"
     if channels:
         for idx, ch in enumerate(channels, start=1):
@@ -757,12 +1070,18 @@ async def channels_manage(callback: CallbackQuery):
     else:
         text += "Hozircha kanal yo'q.\n"
     text += f"\nPost kanali: {post_ch or 'Belgilanmagan'}"
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ Kanal qo'shish", callback_data="add_channel")],
-        [InlineKeyboardButton(text="🗑 O'chirish", callback_data="remove_channel")],
-        [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")]
-    ])
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="➕ Kanal qo'shish", callback_data="add_channel"
+                )
+            ],
+            [InlineKeyboardButton(text="🗑 O'chirish", callback_data="remove_channel")],
+            [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")],
+        ]
+    )
     await callback.message.edit_text(text, reply_markup=keyboard)
 
 
@@ -783,7 +1102,7 @@ async def remove_channel_start(callback: CallbackQuery, state: FSMContext):
 async def add_channel(callback: CallbackQuery, state: FSMContext):
     if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
-    
+
     await state.set_state(ChannelState.waiting)
     await state.update_data(step="add_channel")
     await callback.message.edit_text(
@@ -798,10 +1117,10 @@ async def save_channel(message: Message, state: FSMContext, bot: Bot):
     if not await is_admin(str(message.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         await state.clear()
         return
-    
+
     data = await state.get_data()
     step = data.get("step")
-    
+
     if step == "add_channel":
         text = message.text.strip()
         is_post = text.startswith("post:")
@@ -811,18 +1130,24 @@ async def save_channel(message: Message, state: FSMContext, bot: Bot):
             await state.clear()
             await message.answer("✅ Post kanali belgilandi!")
             return
-        
+
         try:
             channel_id = int(text)
             chat = await bot.get_chat(channel_id)
-            await db_add_channel({"channel_id": str(channel_id), "title": chat.title or str(channel_id), "username": chat.username or ""})
+            await db_add_channel(
+                {
+                    "channel_id": str(channel_id),
+                    "title": chat.title or str(channel_id),
+                    "username": chat.username or "",
+                }
+            )
             await state.clear()
             await message.answer("✅ Kanal qo'shildi!")
-        except:
+        except Exception:
             await message.answer("❌ Kanal topilmadi!")
             await state.clear()
         return
-    
+
     if step == "remove_channel":
         text = (message.text or "").strip()
         if text.lower() in ["post:off", "post:clear", "post:delete"]:
@@ -851,25 +1176,28 @@ async def save_channel(message: Message, state: FSMContext, bot: Bot):
         await state.clear()
         await message.answer("✅ Kanal o'chirildi.")
         return
-    
+
     await state.clear()
+
 
 @router.callback_query(F.data == "post_create")
 async def post_create(callback: CallbackQuery):
     if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
-    
+
     post_ch = await get_post_channel()
     if not post_ch:
         await callback.answer("⚠️ Post kanali belgilanmagan!", show_alert=True)
         return
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🤖 AI bilan yozish", callback_data="post_ai")],
-        [InlineKeyboardButton(text="✍️ Qo'lda yozish", callback_data="post_manual")],
-        [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")]
-    ])
-    
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🤖 AI bilan yozish", callback_data="post_ai")],
+            [InlineKeyboardButton(text="✍️ Qo'lda yozish", callback_data="post_manual")],
+            [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")],
+        ]
+    )
+
     await callback.message.edit_text("📝 <b>Post yaratish</b>", reply_markup=keyboard)
 
 
@@ -877,7 +1205,7 @@ async def post_create(callback: CallbackQuery):
 async def post_ai(callback: CallbackQuery, state: FSMContext):
     if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
-    
+
     await state.set_state(PostState.waiting)
     await state.update_data(step="post_topic")
     await callback.message.edit_text("🤖 Post mavzusini yozing:")
@@ -887,10 +1215,12 @@ async def post_ai(callback: CallbackQuery, state: FSMContext):
 async def post_manual(callback: CallbackQuery, state: FSMContext):
     if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
-    
+
     await state.set_state(PostState.waiting)
     await state.update_data(step="post_manual")
-    await callback.message.edit_text("✍️ Post matnini yozing yoki rasm/album yuboring (caption bilan).")
+    await callback.message.edit_text(
+        "✍️ Post matnini yozing yoki rasm/album yuboring (caption bilan)."
+    )
 
 
 @router.message(PostState.waiting)
@@ -898,24 +1228,30 @@ async def generate_post_message(message: Message, state: FSMContext, bot: Bot):
     if not await is_admin(str(message.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         await state.clear()
         return
-    
+
     data = await state.get_data()
     step = data.get("step")
-    
+
     if step == "post_topic":
         await message.answer("⏳ Post yozilmoqda...")
         post_text = await generate_post(message.text, "Marco Polo Hotel")
-        
+
         await state.update_data(post_text=post_text, step="post_preview")
-        
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Yuborish", callback_data="send_post"),
-             InlineKeyboardButton(text="♻️ Qayta", callback_data="post_ai")],
-            [InlineKeyboardButton(text="❌ Bekor", callback_data="admin_back")]
-        ])
-        
-        await message.answer(f"📝 <b>Tayyor post:</b>\n\n{post_text}", reply_markup=keyboard)
-        
+
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="✅ Yuborish", callback_data="send_post"),
+                    InlineKeyboardButton(text="♻️ Qayta", callback_data="post_ai"),
+                ],
+                [InlineKeyboardButton(text="❌ Bekor", callback_data="admin_back")],
+            ]
+        )
+
+        await message.answer(
+            f"📝 <b>Tayyor post:</b>\n\n{post_text}", reply_markup=keyboard
+        )
+
     elif step == "post_manual":
         if message.media_group_id and message.photo:
             await _collect_post_media_group(message, state)
@@ -924,22 +1260,32 @@ async def generate_post_message(message: Message, state: FSMContext, bot: Bot):
             await state.update_data(
                 post_media=[message.photo[-1].file_id],
                 post_caption=message.caption or "",
-                step="post_preview"
+                step="post_preview",
             )
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="✅ Yuborish", callback_data="send_post")],
-                [InlineKeyboardButton(text="❌ Bekor", callback_data="admin_back")]
-            ])
-            await message.answer("📝 <b>Post:</b>\n\nRasm qabul qilindi.", reply_markup=keyboard)
+            keyboard = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="✅ Yuborish", callback_data="send_post"
+                        )
+                    ],
+                    [InlineKeyboardButton(text="❌ Bekor", callback_data="admin_back")],
+                ]
+            )
+            await message.answer(
+                "📝 <b>Post:</b>\n\nRasm qabul qilindi.", reply_markup=keyboard
+            )
             return
 
         await state.update_data(post_text=message.text or "", step="post_preview")
-        
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Yuborish", callback_data="send_post")],
-            [InlineKeyboardButton(text="❌ Bekor", callback_data="admin_back")]
-        ])
-        
+
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="✅ Yuborish", callback_data="send_post")],
+                [InlineKeyboardButton(text="❌ Bekor", callback_data="admin_back")],
+            ]
+        )
+
         text = message.text or ""
         await message.answer(f"📝 <b>Post:</b>\n\n{text}", reply_markup=keyboard)
     elif step == "post_preview":
@@ -951,17 +1297,17 @@ async def generate_post_message(message: Message, state: FSMContext, bot: Bot):
 async def send_post(callback: CallbackQuery, state: FSMContext, bot: Bot):
     if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
-    
+
     data = await state.get_data()
     post_text = data.get("post_text", "")
     post_media = data.get("post_media")
     post_caption = data.get("post_caption", "")
     post_ch = await get_post_channel()
-    
+
     if not post_ch:
         await callback.answer("⚠️ Kanal belgilanmagan!", show_alert=True)
         return
-    
+
     try:
         if post_media:
             media = []
@@ -976,9 +1322,9 @@ async def send_post(callback: CallbackQuery, state: FSMContext, bot: Bot):
             await bot.send_message(int(post_ch), post_text)
         await callback.answer("✅ Yuborildi!", show_alert=True)
         await callback.message.edit_text("✅ Post kanalga yuborildi!")
-    except:
+    except Exception:
         await callback.answer("❌ Xatolik!", show_alert=True)
-    
+
     await state.clear()
 
 
@@ -986,22 +1332,28 @@ async def send_post(callback: CallbackQuery, state: FSMContext, bot: Bot):
 async def admins_list(callback: CallbackQuery):
     if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
-    
+
     admins = await get_admins()
     super_admin = os.getenv("SUPER_ADMIN_ID", "belgilanmagan")
-    
+
     text = f"👥 <b>Adminlar:</b>\n\n"
     text += f"👑 Super Admin: <code>{super_admin}</code>\n\n"
     text += "📋 Adminlar:\n"
     for admin in admins:
         text += f"• <code>{admin}</code>\n"
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ Qo'shish", callback_data="add_admin_start")],
-        [InlineKeyboardButton(text="➖ O'chirish", callback_data="remove_admin_start")],
-        [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")]
-    ])
-    
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="➕ Qo'shish", callback_data="add_admin_start")],
+            [
+                InlineKeyboardButton(
+                    text="➖ O'chirish", callback_data="remove_admin_start"
+                )
+            ],
+            [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")],
+        ]
+    )
+
     await callback.message.edit_text(text, reply_markup=keyboard)
 
 
@@ -1009,7 +1361,7 @@ async def admins_list(callback: CallbackQuery):
 async def add_admin_start(callback: CallbackQuery, state: FSMContext):
     if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
-    
+
     await state.set_state(AdminManageState.waiting)
     await state.update_data(step="add_admin")
     await callback.message.edit_text("➕ Yangi admin ID sini yuboring:")
@@ -1030,9 +1382,9 @@ async def save_admin(message: Message, state: FSMContext):
     if not await is_admin(str(message.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         await state.clear()
         return
-    
+
     data = await state.get_data()
-    
+
     if data.get("step") == "add_admin":
         admin_id = message.text.strip()
         await db_add_admin(admin_id)
@@ -1053,17 +1405,23 @@ async def available_rooms_start(callback: CallbackQuery, state: FSMContext):
         return
 
     await state.set_state(AvailabilityState.waiting)
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Bugun", callback_data="available_rooms_today"),
-         InlineKeyboardButton(text="Ertaga", callback_data="available_rooms_tomorrow")],
-        [InlineKeyboardButton(text="7 kun", callback_data="available_rooms_week")],
-        [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")],
-    ])
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Bugun", callback_data="available_rooms_today"
+                ),
+                InlineKeyboardButton(
+                    text="Ertaga", callback_data="available_rooms_tomorrow"
+                ),
+            ],
+            [InlineKeyboardButton(text="7 kun", callback_data="available_rooms_week")],
+            [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")],
+        ]
+    )
     await callback.message.edit_text(
-        "🟢 Bo'sh xonalar\n\n"
-        "Sanalarni yuboring:\n"
-        "Format: 2026-04-10 2026-04-12",
-        reply_markup=keyboard
+        "🟢 Bo'sh xonalar\n\nSanalarni yuboring:\nFormat: 2026-04-10 2026-04-12",
+        reply_markup=keyboard,
     )
 
 
@@ -1140,11 +1498,21 @@ async def start_message(callback: CallbackQuery, state: FSMContext):
     else:
         lines.append("Hozircha start xabar yo'q.")
 
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ Yangi qo'shish", callback_data="start_message_add")],
-        [InlineKeyboardButton(text="🗑 O'chirish", callback_data="start_message_delete")],
-        [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")]
-    ])
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="➕ Yangi qo'shish", callback_data="start_message_add"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🗑 O'chirish", callback_data="start_message_delete"
+                )
+            ],
+            [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")],
+        ]
+    )
 
     await callback.message.edit_text("\n".join(lines), reply_markup=keyboard)
 
@@ -1168,7 +1536,9 @@ async def start_message_delete(callback: CallbackQuery, state: FSMContext):
         return
 
     await state.set_state(StartMessageDeleteState.waiting)
-    await callback.message.edit_text("O'chirish uchun start xabar raqamini yuboring (masalan: 1)")
+    await callback.message.edit_text(
+        "O'chirish uchun start xabar raqamini yuboring (masalan: 1)"
+    )
 
 
 @router.message(StartMessageState.waiting)
@@ -1266,9 +1636,10 @@ async def delete_start_message(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("✅ Start xabar o'chirildi.")
 
+
 def _validate_date(date_str: str) -> bool:
     try:
-        datetime.strptime(date_str, '%Y-%m-%d')
+        datetime.strptime(date_str, "%Y-%m-%d")
         return True
     except Exception:
         return False
@@ -1278,14 +1649,18 @@ def _format_room_numbers(numbers: str) -> str:
     return numbers.strip() if numbers else ""
 
 
-async def _send_available_rooms(message: Message, check_in: str, check_out: str) -> None:
+async def _send_available_rooms(
+    message: Message, check_in: str, check_out: str
+) -> None:
     rooms = await find_available_rooms(check_in, check_out, only_active=True)
     if not rooms:
         await message.answer(
             "❌ Bu sanalarda bo'sh xona topilmadi.",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")]
-            ])
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")]
+                ]
+            ),
         )
         return
 
@@ -1300,15 +1675,19 @@ async def _send_available_rooms(message: Message, check_in: str, check_out: str)
 
     await message.answer(
         "\n".join(lines),
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")]
-        ])
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")]
+            ]
+        ),
     )
 
 
 async def _collect_start_media_group(message: Message, state: FSMContext) -> None:
     key = (message.from_user.id, message.media_group_id)
-    group = START_MEDIA_GROUPS.setdefault(key, {"items": [], "caption": "", "task": None})
+    group = START_MEDIA_GROUPS.setdefault(
+        key, {"items": [], "caption": "", "task": None}
+    )
     group["items"].append(message.photo[-1].file_id)
     if message.caption and not group["caption"]:
         group["caption"] = message.caption
@@ -1324,7 +1703,7 @@ async def _collect_start_media_group(message: Message, state: FSMContext) -> Non
         payload = {
             "type": "media_group",
             "files": data["items"],
-            "caption": data.get("caption", "")
+            "caption": data.get("caption", ""),
         }
         raw = await get_setting("start_messages")
         messages = []
@@ -1343,7 +1722,9 @@ async def _collect_start_media_group(message: Message, state: FSMContext) -> Non
 
 async def _collect_post_media_group(message: Message, state: FSMContext) -> None:
     key = (message.from_user.id, message.media_group_id)
-    group = POST_MEDIA_GROUPS.setdefault(key, {"items": [], "caption": "", "task": None})
+    group = POST_MEDIA_GROUPS.setdefault(
+        key, {"items": [], "caption": "", "task": None}
+    )
     group["items"].append(message.photo[-1].file_id)
     if message.caption and not group["caption"]:
         group["caption"] = message.caption
@@ -1359,12 +1740,259 @@ async def _collect_post_media_group(message: Message, state: FSMContext) -> None
         await state.update_data(
             post_media=data["items"],
             post_caption=data.get("caption", ""),
-            step="post_preview"
+            step="post_preview",
         )
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Yuborish", callback_data="send_post")],
-            [InlineKeyboardButton(text="❌ Bekor", callback_data="admin_back")]
-        ])
-        await message.answer("📝 <b>Post:</b>\n\nRasmlar qabul qilindi.", reply_markup=keyboard)
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="✅ Yuborish", callback_data="send_post")],
+                [InlineKeyboardButton(text="❌ Bekor", callback_data="admin_back")],
+            ]
+        )
+        await message.answer(
+            "📝 <b>Post:</b>\n\nRasmlar qabul qilindi.", reply_markup=keyboard
+        )
 
     group["task"] = asyncio.create_task(finalize())
+
+
+@router.callback_query(F.data.startswith("room_photos_"))
+async def room_photos(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+        return
+
+    room_id = callback.data.replace("room_photos_", "")
+    room = await get_room(room_id)
+
+    if not room:
+        await callback.answer("❌ Xona topilmadi", show_alert=True)
+        return
+
+    photos = await get_room_photos(room_id)
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="➕ Rasm qo'shish", callback_data=f"room_add_photo_{room_id}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🗑 Barchasini o'chirish",
+                    callback_data=f"room_clear_photos_{room_id}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="◀️ Orqaga", callback_data=f"admin_room_{room_id}"
+                )
+            ],
+        ]
+    )
+
+    if not photos:
+        await callback.message.edit_text(
+            f"📸 <b>{room.get('name')}</b> - Rasmlar\n\n"
+            f"❌ Hozircha rasmlar yo'q.\n"
+            f"➕ Rasm qo'shish tugmasini bosing.",
+            reply_markup=keyboard,
+        )
+    else:
+        await callback.message.edit_text(
+            f"📸 <b>{room.get('name')}</b> - Rasmlar ({len(photos)} ta)\n\n"
+            f"Quyida xona rasmlari:",
+            reply_markup=keyboard,
+        )
+        for i, photo_id in enumerate(photos[:10]):
+            try:
+                await callback.message.answer_photo(
+                    photo_id, caption=f"Rasm {i + 1}/{len(photos)}"
+                )
+            except Exception:
+                await callback.message.answer(
+                    f"📷 Rasm {i + 1}: (rasm yuklab bo'lmadi)"
+                )
+
+
+@router.callback_query(F.data.startswith("room_add_photo_"))
+async def room_add_photo_start(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+        return
+
+    room_id = callback.data.replace("room_add_photo_", "")
+    await state.set_state(RoomPhotoState.waiting)
+    await state.update_data(room_id=room_id, step="add_photo")
+
+    await callback.message.edit_text(
+        f"📸 <b>Rasm qo'shish</b>\n\n"
+        f"Xonaga rasm yoki album (bir nechta rasm) yuboring.\n"
+        f"Bir marta yuborilganda - 1 ta, album bo'lsa - bir nechta rasm qo'shiladi.",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="❌ Bekor", callback_data=f"room_photos_{room_id}"
+                    )
+                ]
+            ]
+        ),
+    )
+
+
+@router.callback_query(F.data.startswith("room_clear_photos_"))
+async def room_clear_photos(callback: CallbackQuery):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+        return
+
+    room_id = callback.data.replace("room_clear_photos_", "")
+    await clear_room_photos(room_id)
+
+    await callback.answer("✅ Barcha rasmlar o'chirildi!", show_alert=True)
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="➕ Rasm qo'shish", callback_data=f"room_add_photo_{room_id}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="◀️ Orqaga", callback_data=f"admin_room_{room_id}"
+                )
+            ],
+        ]
+    )
+
+    await callback.message.edit_text(
+        "✅ Barcha rasmlar o'chirildi!\n\n➕ Rasm qo'shish tugmasini bosing.",
+        reply_markup=keyboard,
+    )
+
+
+@router.callback_query(F.data.startswith("room_remove_photo_"))
+async def room_remove_photo(callback: CallbackQuery):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+        return
+
+    parts = callback.data.replace("room_remove_photo_", "").split("_")
+    if len(parts) >= 2:
+        room_id = parts[0]
+        idx = int(parts[1])
+        await remove_room_photo(room_id, idx)
+        await callback.answer("✅ Rasm o'chirildi!", show_alert=True)
+        await callback.message.delete()
+
+
+@router.message(RoomPhotoState.waiting)
+async def save_room_photo(message: Message, state: FSMContext):
+    if not await is_admin(str(message.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+        await state.clear()
+        return
+
+    data = await state.get_data()
+    if data.get("step") != "add_photo":
+        await state.clear()
+        return
+
+    room_id = data.get("room_id")
+
+    if message.media_group_id and message.photo:
+        key = (message.from_user.id, message.media_group_id)
+        group = ROOM_PHOTO_GROUPS.setdefault(key, {"items": [], "task": None})
+        group["items"].append(message.photo[-1].file_id)
+
+        if group["task"]:
+            return
+
+        async def finalize():
+            await asyncio.sleep(1.0)
+            group_data = ROOM_PHOTO_GROUPS.pop(key, None)
+            if not group_data or not group_data.get("items"):
+                return
+            await add_room_photos_bulk(room_id, group_data["items"])
+            count = len(group_data["items"])
+            await state.clear()
+            await message.answer(f"✅ {count} ta rasm qo'shildi!")
+
+        group["task"] = asyncio.create_task(finalize())
+        return
+
+    if message.photo:
+        await add_room_photo(room_id, message.photo[-1].file_id)
+        await state.clear()
+        await message.answer("✅ Rasm qo'shildi!")
+    else:
+        await message.answer("❌ Iltimos, rasm yuboring.")
+
+
+@router.callback_query(F.data == "edit_hotel_location")
+async def edit_hotel_location(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+        return
+
+    await state.set_state(HotelLocationState.waiting)
+    await state.update_data(step="hotel_location")
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="📍 Lokatsiya yuborish", callback_data="send_location_hint"
+                )
+            ],
+            [InlineKeyboardButton(text="◀️ Orqaga", callback_data="hotel_info")],
+        ]
+    )
+
+    await callback.message.edit_text(
+        "🗺 <b>Lokatsiya sozlash</b>\n\n"
+        "Telegram orqali lokatsiya yuboring.\n"
+        "Buning uchun:\n"
+        "1. 📎 (attach) tugmasini bosing\n"
+        "2. 📍 Location tanlang\n"
+        "3. Yo'nalishni tanlang\n\n"
+        "Yoki pastdagi tugmani bosing:",
+        reply_markup=keyboard,
+    )
+
+
+@router.callback_query(F.data == "send_location_hint")
+async def send_location_hint(callback: CallbackQuery):
+    await callback.message.edit_text(
+        "📍 Iltimos, pastdagi tugmalardan birini tanlang:\n\n"
+        "Qo'lda kiritish uchun: /location_lat_lng formatda yozing.\n"
+        "Misol: /location_41.2995_69.2401\n\n"
+        "Yoki Telegram orqali lokatsiya yuboring.",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Orqaga", callback_data="hotel_info")]
+            ]
+        ),
+    )
+
+
+@router.message(HotelLocationState.waiting)
+async def save_hotel_location(message: Message, state: FSMContext):
+    if not await is_admin(str(message.from_user.id), os.getenv("SUPER_ADMIN_ID")):
+        await state.clear()
+        return
+
+    data = await state.get_data()
+    if data.get("step") != "hotel_location":
+        await state.clear()
+        return
+
+    if message.location:
+        lat = message.location.latitude
+        lng = message.location.longitude
+        await update_hotel_location(lat, lng)
+        await state.clear()
+        await message.answer(f"✅ Lokatsiya saqlandi!\n\n📍 {lat}, {lng}")
+
+        try:
+            await message.answer_location(lat, lng)
+        except Exception:
+            pass
+    else:
+        await message.answer("❌ Iltimos, Telegram orqali lokatsiya yuboring.")

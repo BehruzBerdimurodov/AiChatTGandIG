@@ -4,6 +4,7 @@ Asinxron aiosqlite orqali xavfsiz va yuqori bosimga chidamli Ma'lumotlar Bazasi
 
 import aiosqlite
 import os
+import json
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from contextlib import asynccontextmanager
@@ -64,6 +65,18 @@ async def init_db():
             pass
         try:
             await db.execute("ALTER TABLE rooms ADD COLUMN room_numbers TEXT DEFAULT ''")
+        except Exception:
+            pass
+        try:
+            await db.execute("ALTER TABLE rooms ADD COLUMN photos TEXT DEFAULT '[]'")
+        except Exception:
+            pass
+        try:
+            await db.execute("ALTER TABLE hotel ADD COLUMN latitude REAL")
+        except Exception:
+            pass
+        try:
+            await db.execute("ALTER TABLE hotel ADD COLUMN longitude REAL")
         except Exception:
             pass
 
@@ -590,3 +603,59 @@ async def set_setting(key: str, value: str):
 async def delete_setting(key: str):
     async with get_db() as db:
         await db.execute("DELETE FROM settings WHERE key = ?", (key,))
+
+
+# ─── ROOM PHOTOS ────────────────────────────────────────────────────────────
+
+async def get_room_photos(room_id: str) -> List[str]:
+    room = await get_room(room_id)
+    if not room:
+        return []
+    raw = room.get('photos') or '[]'
+    try:
+        data = json.loads(raw)
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+async def add_room_photo(room_id: str, file_id: str):
+    photos = await get_room_photos(room_id)
+    if file_id not in photos:
+        photos.append(file_id)
+    await update_room(room_id, 'photos', json.dumps(photos))
+
+
+async def add_room_photos_bulk(room_id: str, file_ids: List[str]):
+    photos = await get_room_photos(room_id)
+    for fid in file_ids:
+        if fid not in photos:
+            photos.append(fid)
+    await update_room(room_id, 'photos', json.dumps(photos))
+
+
+async def remove_room_photo(room_id: str, idx: int):
+    photos = await get_room_photos(room_id)
+    if 0 <= idx < len(photos):
+        photos.pop(idx)
+    await update_room(room_id, 'photos', json.dumps(photos))
+
+
+async def clear_room_photos(room_id: str):
+    await update_room(room_id, 'photos', '[]')
+
+
+# ─── HOTEL LOCATION ─────────────────────────────────────────────────────────
+
+async def get_hotel_location() -> Optional[tuple]:
+    hotel = await get_hotel()
+    lat = hotel.get('latitude')
+    lng = hotel.get('longitude')
+    if lat is not None and lng is not None:
+        return float(lat), float(lng)
+    return None
+
+
+async def update_hotel_location(lat: float, lng: float):
+    async with get_db() as db:
+        await db.execute("UPDATE hotel SET latitude = ?, longitude = ?", (lat, lng))

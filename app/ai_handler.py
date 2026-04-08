@@ -10,14 +10,24 @@ import logging
 from datetime import datetime
 from openai import AsyncOpenAI
 from config.database import (
-    get_hotel, get_rooms, create_order,
-    log_message, log_activity, register_user,
-    get_admins, find_available_rooms, get_user
+    get_hotel,
+    get_rooms,
+    get_room,
+    create_order,
+    log_message,
+    log_activity,
+    register_user,
+    get_admins,
+    find_available_rooms,
+    get_user,
+    get_room_photos,
+    get_hotel_location,
 )
 
 log = logging.getLogger(__name__)
 
 _client: AsyncOpenAI | None = None
+
 
 def get_openai_client() -> AsyncOpenAI:
     global _client
@@ -28,27 +38,48 @@ def get_openai_client() -> AsyncOpenAI:
         _client = AsyncOpenAI(api_key=key)
     return _client
 
+
 MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+
+PENDING_ROOM_PHOTOS: dict[str, dict] = {}
+PENDING_LOCATION: dict[str, dict] = {}
 
 # Suhbat tarixi (xotirada)
 _store: dict[str, list[dict]] = {}
 MAX_HISTORY = 20
 
 # Bron holatlari
-BOOKING_STORE: dict[str, dict] = {}   # Tasdiqlash kutayotganlar
-BOOKING_DRAFT: dict[str, dict] = {}   # To'ldirilayotgan bron
+BOOKING_STORE: dict[str, dict] = {}  # Tasdiqlash kutayotganlar
+BOOKING_DRAFT: dict[str, dict] = {}  # To'ldirilayotgan bron
 
 BOOKING_INTENT_KEYWORDS = [
-    "xona kerak", "xona bron", "xona band", "bron qil", "band qil",
-    "xona olmoqchi", "xona reserv", "reservatsiya", "booking",
-    "joy band", "joy kerak", "qo'nmoqchi", "tunash",
-    "bron qilmoqchi", "bron qilish", "band qilmoqchi",
-    "xona olish", "joy olish",
+    "xona kerak",
+    "xona bron",
+    "xona band",
+    "bron qil",
+    "band qil",
+    "xona olmoqchi",
+    "xona reserv",
+    "reservatsiya",
+    "booking",
+    "joy band",
+    "joy kerak",
+    "qo'nmoqchi",
+    "tunash",
+    "bron qilmoqchi",
+    "bron qilish",
+    "band qilmoqchi",
+    "xona olish",
+    "joy olish",
 ]
 
 BOOKING_CANCEL_KEYWORDS = [
-    "bron bekor", "bekor qilish", "bron kerak emas",
-    "rad etaman", "bron cancel", "bron toxtat",
+    "bron bekor",
+    "bekor qilish",
+    "bron kerak emas",
+    "rad etaman",
+    "bron cancel",
+    "bron toxtat",
 ]
 
 # ──────────────────────────────────────────────
@@ -56,18 +87,45 @@ BOOKING_CANCEL_KEYWORDS = [
 # ──────────────────────────────────────────────
 
 MONTH_MAP = {
-    "yanvar": 1, "yanvarь": 1, "january": 1, "jan": 1,
-    "fevral": 2, "fevralь": 2, "february": 2, "feb": 2,
-    "mart": 3, "march": 3, "mar": 3,
-    "aprel": 4, "april": 4, "apr": 4,
+    "yanvar": 1,
+    "yanvarь": 1,
+    "january": 1,
+    "jan": 1,
+    "fevral": 2,
+    "fevralь": 2,
+    "february": 2,
+    "feb": 2,
+    "mart": 3,
+    "march": 3,
+    "mar": 3,
+    "aprel": 4,
+    "april": 4,
+    "apr": 4,
     "may": 5,
-    "iyun": 6, "iyunь": 6, "june": 6, "jun": 6,
-    "iyul": 7, "iyulь": 7, "july": 7, "jul": 7,
-    "avgust": 8, "august": 8, "aug": 8,
-    "sentabr": 9, "sentyabr": 9, "september": 9, "sep": 9,
-    "oktyabr": 10, "october": 10, "oct": 10,
-    "noyabr": 11, "november": 11, "nov": 11,
-    "dekabr": 12, "december": 12, "dec": 12,
+    "iyun": 6,
+    "iyunь": 6,
+    "june": 6,
+    "jun": 6,
+    "iyul": 7,
+    "iyulь": 7,
+    "july": 7,
+    "jul": 7,
+    "avgust": 8,
+    "august": 8,
+    "aug": 8,
+    "sentabr": 9,
+    "sentyabr": 9,
+    "september": 9,
+    "sep": 9,
+    "oktyabr": 10,
+    "october": 10,
+    "oct": 10,
+    "noyabr": 11,
+    "november": 11,
+    "nov": 11,
+    "dekabr": 12,
+    "december": 12,
+    "dec": 12,
 }
 
 
@@ -81,17 +139,17 @@ def _parse_date(text: str) -> str | None:
     year = today.year
 
     # YYYY-MM-DD
-    m = re.search(r'(\d{4})[-./](\d{1,2})[-./](\d{1,2})', text)
+    m = re.search(r"(\d{4})[-./](\d{1,2})[-./](\d{1,2})", text)
     if m:
         return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
 
     # DD.MM.YYYY yoki DD/MM/YYYY
-    m = re.search(r'(\d{1,2})[-./](\d{1,2})[-./](\d{4})', text)
+    m = re.search(r"(\d{1,2})[-./](\d{1,2})[-./](\d{4})", text)
     if m:
         return f"{m.group(3)}-{int(m.group(2)):02d}-{int(m.group(1)):02d}"
 
     # DD.MM (yil yo'q)
-    m = re.search(r'(\d{1,2})[-./](\d{1,2})$', text)
+    m = re.search(r"(\d{1,2})[-./](\d{1,2})$", text)
     if m:
         day, month = int(m.group(1)), int(m.group(2))
         # Kelajakdagi yilni topish
@@ -103,7 +161,7 @@ def _parse_date(text: str) -> str | None:
     # "12 mart", "mart 12", "12-mart"
     for month_name, month_num in MONTH_MAP.items():
         # "12 mart" yoki "12-mart"
-        m = re.search(rf'(\d{{1,2}})\s*[-]?\s*{month_name}', text)
+        m = re.search(rf"(\d{{1,2}})\s*[-]?\s*{month_name}", text)
         if m:
             day = int(m.group(1))
             try:
@@ -114,7 +172,7 @@ def _parse_date(text: str) -> str | None:
             except ValueError:
                 continue
         # "mart 12"
-        m = re.search(rf'{month_name}\s*[-]?\s*(\d{{1,2}})', text)
+        m = re.search(rf"{month_name}\s*[-]?\s*(\d{{1,2}})", text)
         if m:
             day = int(m.group(1))
             try:
@@ -132,9 +190,11 @@ def _parse_date(text: str) -> str | None:
 # SYSTEM PROMPT
 # ──────────────────────────────────────────────
 
+
 async def _build_system_prompt(platform: str = "telegram") -> str:
     hotel = await get_hotel()
     rooms = await get_rooms(only_active=True)
+    loc = await get_hotel_location()
 
     room_lines = []
     for r in rooms:
@@ -145,10 +205,14 @@ async def _build_system_prompt(platform: str = "telegram") -> str:
         )
     rooms_text = "\n".join(room_lines) if room_lines else "Xonalar yangilanmoqda"
 
-    hotel_phone = hotel.get('phone', '+998773397171')
-    hotel_address = hotel.get('address', "Do'mbirobod Naqqoshlik 121A")
-    hotel_telegram = hotel.get('telegram', '@Marcopolohotel_1')
+    hotel_phone = hotel.get("phone", "+998773397171")
+    hotel_address = hotel.get("address", "Do'mbirobod Naqqoshlik 121A")
+    hotel_telegram = hotel.get("telegram", "@Marcopolohotel_1")
     bugun = datetime.now().strftime("%Y-%m-%d, %A")
+
+    loc_info = ""
+    if loc:
+        loc_info = f"\n📍 Lokatsiya: {loc[0]}, {loc[1]}"
 
     platform_note = ""
     if platform == "instagram":
@@ -161,7 +225,7 @@ MEHMONXONA:
 Nomi: Marco Polo Hotel
 Manzil: {hotel_address}, Toshkent
 Telefon: {hotel_phone}
-Telegram: {hotel_telegram}
+Telegram: {hotel_telegram}{loc_info}
 
 XONALAR:
 {rooms_text}
@@ -176,12 +240,16 @@ QO'LLANMA:
 - Rus, O'zbek, Ingliz tillarida javob ber
 - Faqat oddiy matn yoz, markdown ishlatma (** yoki __ yo'q)
 - Bron so'rasa men o'zim boshqaraman, sen shunchaki suhbatni davom ettir
-- Telefon: {hotel_phone}"""
+- Telefon: {hotel_phone}
+- Agar foydalanuvchi xona rasmini so'rasa, "SEND_ROOM_PHOTOS" buyrug'ini yubor
+- Agar foydalanuvchi lokatsiyani so'rasa, "SEND_LOCATION" buyrug'ini yubor
+- Xona nomi so'ralganda: SEND_ROOM_PHOTOS:xona_nomi (masalan: SEND_ROOM_PHOTOS:Standart)"""
 
 
 # ──────────────────────────────────────────────
 # XOTIRANI BOSHQARISH
 # ──────────────────────────────────────────────
+
 
 def get_history(user_id: str) -> list:
     return list(_store.get(str(user_id), []))
@@ -207,7 +275,13 @@ def active_users() -> int:
 # AI JAVOB
 # ──────────────────────────────────────────────
 
-async def _ai_reply(user_id: str, user_message: str, platform: str = "telegram", extra_instruction: str = "") -> str:
+
+async def _ai_reply(
+    user_id: str,
+    user_message: str,
+    platform: str = "telegram",
+    extra_instruction: str = "",
+) -> str:
     history = get_history(user_id)
     system = await _build_system_prompt(platform)
     if extra_instruction:
@@ -229,10 +303,10 @@ async def _ai_reply(user_id: str, user_message: str, platform: str = "telegram",
         )
         text = resp.choices[0].message.content.strip()
         # Markdown tozalash — bold/italic belgilarini olib tashlash
-        text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
-        text = re.sub(r'\*(.+?)\*', r'\1', text)
-        text = re.sub(r'__(.+?)__', r'\1', text)
-        text = re.sub(r'_(.+?)_', r'\1', text)
+        text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+        text = re.sub(r"\*(.+?)\*", r"\1", text)
+        text = re.sub(r"__(.+?)__", r"\1", text)
+        text = re.sub(r"_(.+?)_", r"\1", text)
         return text
     except Exception as e:
         log.error(f"[AI ERROR] {e}")
@@ -243,6 +317,7 @@ async def _ai_reply(user_id: str, user_message: str, platform: str = "telegram",
 # ──────────────────────────────────────────────
 # BRON JARAYONI YORDAMCHILARI
 # ──────────────────────────────────────────────
+
 
 def _is_booking_intent(text: str) -> bool:
     t = text.lower().strip()
@@ -288,7 +363,7 @@ async def _resolve_room(draft: dict, user_message: str, rooms: list) -> dict | N
 
     # Raqam bilan tanlash: "1", "2", "1 maqul", "1 dedimu", "birinchi" va h.k.
     # Xabarning boshida yoki yolg'iz turgan raqam
-    num_match = re.match(r'^(\d+)', text)
+    num_match = re.match(r"^(\d+)", text)
     if num_match:
         idx = int(num_match.group(1)) - 1
         if 0 <= idx < len(rooms):
@@ -296,9 +371,15 @@ async def _resolve_room(draft: dict, user_message: str, rooms: list) -> dict | N
 
     # So'zli raqam
     word_nums = {
-        "birinchi": 0, "ikkinchi": 1, "uchinchi": 2,
-        "to'rtinchi": 3, "beshinchi": 4, "oltinchi": 5,
-        "first": 0, "second": 1, "third": 2,
+        "birinchi": 0,
+        "ikkinchi": 1,
+        "uchinchi": 2,
+        "to'rtinchi": 3,
+        "beshinchi": 4,
+        "oltinchi": 5,
+        "first": 0,
+        "second": 1,
+        "third": 2,
     }
     for word, idx in word_nums.items():
         if word in text and 0 <= idx < len(rooms):
@@ -326,7 +407,10 @@ async def _resolve_room(draft: dict, user_message: str, rooms: list) -> dict | N
 # ASOSIY BRON JARAYONI
 # ──────────────────────────────────────────────
 
-async def _handle_booking_flow(user_id: str, user_message: str, platform: str) -> str | None:
+
+async def _handle_booking_flow(
+    user_id: str, user_message: str, platform: str
+) -> str | None:
     """
     Bron jarayonini boshqaradi.
     Agar bron aktiv yoki intent bo'lsa — javob qaytaradi.
@@ -411,12 +495,15 @@ async def _handle_booking_flow(user_id: str, user_message: str, platform: str) -
     # ── MEHMONLAR SONI ────────────────────────────────────
     if missing == "guests":
         # Sof raqam yoki "X kishi/nafar" formatini qabul qil
-        guests_match = re.search(r'(\d+)\s*(kishi|odam|mehmon|nafar|ta kishi)?', user_message.strip().lower())
+        guests_match = re.search(
+            r"(\d+)\s*(kishi|odam|mehmon|nafar|ta kishi)?", user_message.strip().lower()
+        )
         if guests_match:
             # Lekin sana so'zlari bo'lsa skip
             date_words = list(MONTH_MAP.keys()) + ["-", "."]
-            has_date = any(m in user_message.lower() for m in date_words) or \
-                       re.search(r'\d{4}', user_message)
+            has_date = any(m in user_message.lower() for m in date_words) or re.search(
+                r"\d{4}", user_message
+            )
             if not has_date:
                 n = int(guests_match.group(1))
                 capacity = draft.get("room_capacity", 2)
@@ -438,11 +525,11 @@ async def _handle_booking_flow(user_id: str, user_message: str, platform: str) -
         phone_raw = user_message.strip().replace(" ", "").replace("-", "")
         if not phone_raw.startswith("+"):
             phone_raw = "+" + phone_raw
-        if re.fullmatch(r'\+998\d{9}', phone_raw):
+        if re.fullmatch(r"\+\d{7,15}", phone_raw):
             draft["phone"] = phone_raw
             BOOKING_DRAFT[user_id] = draft
             missing = _next_missing(draft)
-        elif re.search(r'\d{9,}', user_message):
+        elif re.search(r"\d{6,}", user_message):
             return "📞 Telefon raqam formati noto'g'ri. Quyidagi formatda yozing: +998901234567"
         else:
             return "📞 Telefon raqamingizni yozing (masalan: +998901234567)."
@@ -467,7 +554,9 @@ async def _handle_booking_flow(user_id: str, user_message: str, platform: str) -
     return None
 
 
-async def _finalize_booking(user_id: str, draft: dict, platform: str, rooms_all: list) -> str:
+async def _finalize_booking(
+    user_id: str, draft: dict, platform: str, rooms_all: list
+) -> str:
     """Barcha ma'lumot to'liq — bron tasdiqlash xabarini qaytaradi"""
     # Xonani tekshirish
     room = None
@@ -481,7 +570,9 @@ async def _finalize_booking(user_id: str, draft: dict, platform: str, rooms_all:
         return "Xona topilmadi. Iltimos, qayta boshlang."
 
     # Mavjudlikni tekshirish
-    available = await find_available_rooms(draft["check_in"], draft["check_out"], only_active=True)
+    available = await find_available_rooms(
+        draft["check_in"], draft["check_out"], only_active=True
+    )
     available_ids = {r["id"] for r in available}
 
     if room["id"] not in available_ids:
@@ -566,6 +657,7 @@ async def _finalize_booking(user_id: str, draft: dict, platform: str, rooms_all:
 # ASOSIY FUNKSIYA
 # ──────────────────────────────────────────────
 
+
 async def get_ai_response(
     user_id: str,
     user_message: str,
@@ -584,15 +676,68 @@ async def get_ai_response(
 
     # Oddiy AI javob
     reply = await _ai_reply(user_id, user_message, platform)
+
+    # MAXSUS BUYURUQULARNI TEKSHIRISH
+    if "SEND_LOCATION" in reply:
+        PENDING_LOCATION[user_id] = {"action": "send_location"}
+        reply = reply.replace("SEND_LOCATION", "").strip()
+
+    if "SEND_ROOM_PHOTOS:" in reply:
+        parts = reply.split("SEND_ROOM_PHOTOS:")
+        room_name = parts[1].strip().split("\n")[0].strip() if len(parts) > 1 else ""
+        reply = parts[0].strip()
+        if room_name:
+            PENDING_ROOM_PHOTOS[user_id] = {
+                "room_name": room_name,
+                "action": "send_photos",
+            }
+
     push_message(user_id, "assistant", reply)
     await log_message(user_id, "incoming", user_message, reply)
     await log_activity(user_id, "chat", user_message[:50])
     return reply
 
 
+async def check_pending_actions(user_id: str) -> dict | None:
+    """Foydalanuvchida kutayotgan actions borligini tekshiradi"""
+    if user_id in PENDING_LOCATION:
+        return PENDING_LOCATION.pop(user_id)
+    if user_id in PENDING_ROOM_PHOTOS:
+        return PENDING_ROOM_PHOTOS.pop(user_id)
+    return None
+
+
+async def get_room_photos_for_user(room_name: str) -> tuple[str, list]:
+    """Xona nomi bo'yicha rasm file_ids qaytaradi"""
+    rooms = await get_rooms(only_active=True)
+    room_name_lower = room_name.lower()
+
+    for room in rooms:
+        if (
+            room_name_lower in room.get("name", "").lower()
+            or room.get("name", "").lower() in room_name_lower
+        ):
+            photos = await get_room_photos(room["id"])
+            return room.get("name", "Xona"), photos
+
+    for room in rooms:
+        short = room.get("name", "").lower().split()[0]
+        if short in room_name_lower:
+            photos = await get_room_photos(room["id"])
+            return room.get("name", "Xona"), photos
+
+    return "", []
+
+
+async def get_hotel_location_for_user() -> tuple[float, float] | None:
+    """Mehmonxona lokatsiyasini qaytaradi"""
+    return await get_hotel_location()
+
+
 # ──────────────────────────────────────────────
 # YORDAMCHI FUNKSIYALAR
 # ──────────────────────────────────────────────
+
 
 def get_booking_data(user_id: str) -> dict | None:
     return BOOKING_STORE.get(str(user_id))
@@ -645,8 +790,8 @@ async def generate_booking_confirmation(order_data: dict) -> str:
 async def send_order_to_admins(bot, order_data: dict, admin_ids: list):
     hotel = await get_hotel()
     price_fmt = f"{order_data['total_price']:,}".replace(",", " ")
-    hotel_address = hotel.get('address', "Do'mbirobod Naqqoshlik 121A")
-    source_label = order_data.get('source', 'telegram').upper()
+    hotel_address = hotel.get("address", "Do'mbirobod Naqqoshlik 121A")
+    source_label = order_data.get("source", "telegram").upper()
 
     message = (
         f"🔔 <b>YANGI BRON! [{source_label}]</b>\n\n"
@@ -660,15 +805,22 @@ async def send_order_to_admins(bot, order_data: dict, admin_ids: list):
     )
 
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-    phone_clean = order_data.get('phone', '').replace('tel:', '').strip()
+
+    phone_clean = order_data.get("phone", "").replace("tel:", "").strip()
     buttons = [
         [
-            InlineKeyboardButton(text="✅ Tasdiqlash", callback_data=f"order_confirm_{order_data['id']}"),
-            InlineKeyboardButton(text="❌ Bekor", callback_data=f"order_cancel_{order_data['id']}"),
+            InlineKeyboardButton(
+                text="✅ Tasdiqlash", callback_data=f"order_confirm_{order_data['id']}"
+            ),
+            InlineKeyboardButton(
+                text="❌ Bekor", callback_data=f"order_cancel_{order_data['id']}"
+            ),
         ]
     ]
-    if phone_clean and phone_clean.startswith('+'):
-        buttons.append([InlineKeyboardButton(text="📞 Qo'ng'iroq", url=f"tel:{phone_clean}")])
+    if phone_clean and phone_clean.startswith("+"):
+        buttons.append(
+            [InlineKeyboardButton(text="📞 Qo'ng'iroq", url=f"tel:{phone_clean}")]
+        )
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
 

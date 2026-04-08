@@ -6,19 +6,39 @@ AI chat + Bron qilish faqat yozishma orqali
 import logging
 import json
 import os
+import re
 from datetime import datetime
 from aiogram import Router, F, Bot
 from aiogram.filters import CommandStart
-from aiogram.types import Message, ReplyKeyboardRemove, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import (
+    Message,
+    ReplyKeyboardRemove,
+    ReplyKeyboardMarkup,
+    KeyboardButton,
+    InputMediaPhoto,
+)
 from aiogram.enums import ChatAction
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
-from app.ai_handler import get_ai_response, get_booking_data, clear_booking_data
+from app.ai_handler import (
+    get_ai_response,
+    get_booking_data,
+    clear_booking_data,
+    check_pending_actions,
+    get_room_photos_for_user,
+    get_hotel_location_for_user,
+)
 from bot.handlers.admin import ADMIN_IN_ADMIN_MODE
 from app.subscription import check_subscription
 from config.database import (
-    get_hotel, register_user, log_activity, get_user, get_setting, create_order, get_admins
+    get_hotel,
+    register_user,
+    log_activity,
+    get_user,
+    get_setting,
+    create_order,
+    get_admins,
 )
 
 log = logging.getLogger(__name__)
@@ -76,16 +96,24 @@ async def send_start_message(bot: Bot, chat_id: int):
                 await bot.send_message(chat_id, payload.get("text", ""))
                 sent_any = True
             elif msg_type == "photo":
-                await bot.send_photo(chat_id, payload.get("file_id"), caption=payload.get("caption", ""))
+                await bot.send_photo(
+                    chat_id, payload.get("file_id"), caption=payload.get("caption", "")
+                )
                 sent_any = True
             elif msg_type == "video":
-                await bot.send_video(chat_id, payload.get("file_id"), caption=payload.get("caption", ""))
+                await bot.send_video(
+                    chat_id, payload.get("file_id"), caption=payload.get("caption", "")
+                )
                 sent_any = True
             elif msg_type == "voice":
-                await bot.send_voice(chat_id, payload.get("file_id"), caption=payload.get("caption", ""))
+                await bot.send_voice(
+                    chat_id, payload.get("file_id"), caption=payload.get("caption", "")
+                )
                 sent_any = True
             elif msg_type == "document":
-                await bot.send_document(chat_id, payload.get("file_id"), caption=payload.get("caption", ""))
+                await bot.send_document(
+                    chat_id, payload.get("file_id"), caption=payload.get("caption", "")
+                )
                 sent_any = True
             elif msg_type == "location":
                 await bot.send_location(chat_id, payload.get("lat"), payload.get("lng"))
@@ -93,6 +121,7 @@ async def send_start_message(bot: Bot, chat_id: int):
     except Exception as e:
         log.error(f"Error sending start messages: {e}")
     return sent_any
+
 
 class OnboardState(StatesGroup):
     name = State()
@@ -112,7 +141,9 @@ async def cmd_start(message: Message, bot: Bot, state: FSMContext):
 
     ok, missing = await check_subscription(bot, user.id)
     if not ok:
-        text = "⚠️ <b>Botdan foydalanish uchun quyidagi kanallarga obuna bo'ling:</b>\n\n"
+        text = (
+            "⚠️ <b>Botdan foydalanish uchun quyidagi kanallarga obuna bo'ling:</b>\n\n"
+        )
         for ch in missing:
             username = ch.get("username", "")
             title = ch.get("title", "Kanal")
@@ -127,34 +158,38 @@ async def cmd_start(message: Message, bot: Bot, state: FSMContext):
 
     existing = await get_user(user_id)
     has_phone = bool(existing and existing.get("phone"))
-    has_name = bool(existing and (existing.get("first_name") or existing.get("last_name")))
+    has_name = bool(
+        existing and (existing.get("first_name") or existing.get("last_name"))
+    )
 
     if not has_phone or not has_name:
         if has_name and not has_phone:
             await state.set_state(OnboardState.contact)
             kb = ReplyKeyboardMarkup(
-                keyboard=[[KeyboardButton(text="📱 Kontakt yuborish", request_contact=True)]],
+                keyboard=[
+                    [KeyboardButton(text="📱 Kontakt yuborish", request_contact=True)]
+                ],
                 resize_keyboard=True,
-                one_time_keyboard=True
+                one_time_keyboard=True,
             )
             await message.answer(
-                f"Hurmatli {existing.get('first_name', '')}, botimizdan to'liq foydalanish uchun telefon raqamingizni yozib yuboring yuboring yoki pastdagi tugmani bosing:",
-                reply_markup=kb
+                f"Hurmatli {existing.get('first_name', '')}, botimizdan to'liq foydalanish uchun telefon raqamingizni yozib yuboring yoki pastdagi tugmani bosing:",
+                reply_markup=kb,
             )
             return
         await state.set_state(OnboardState.name)
         await message.answer(
             "Assalomu alaykum! Iltimos, ism va familiyangizni yozing.\nMasalan: Behruz Berdimurodov",
-            reply_markup=ReplyKeyboardRemove()
+            reply_markup=ReplyKeyboardRemove(),
         )
         return
 
     await register_user(
         user_id=user_id,
-        user_type='telegram',
+        user_type="telegram",
         first_name=user.first_name or existing.get("first_name") or "Mehmon",
         last_name=user.last_name or existing.get("last_name") or "",
-        username=user.username or existing.get("username") or ""
+        username=user.username or existing.get("username") or "",
     )
     await log_activity(user_id, "start", f"/start")
 
@@ -170,7 +205,7 @@ async def cmd_start(message: Message, bot: Bot, state: FSMContext):
         f"Telefon: {hotel.get('phone', '+998773397171')}\n\n"
         f"Men sizga yordam berishga tayyorman.\n"
         f"Savol yoki so'rov yozing!",
-        reply_markup=ReplyKeyboardRemove()
+        reply_markup=ReplyKeyboardRemove(),
     )
 
 
@@ -191,7 +226,7 @@ async def onboard_name(message: Message, state: FSMContext):
         first_name=first_name,
         last_name=last_name,
         username=message.from_user.username or "",
-        phone=""
+        phone="",
     )
     await state.update_data(first_name=first_name, last_name=last_name)
     await state.set_state(OnboardState.contact)
@@ -199,9 +234,12 @@ async def onboard_name(message: Message, state: FSMContext):
     kb = ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="📱 Kontakt yuborish", request_contact=True)]],
         resize_keyboard=True,
-        one_time_keyboard=True
+        one_time_keyboard=True,
     )
-    await message.answer("Rahmat! Endi telefon raqamingizni yuboring yoki pastdagi tugmani bosing:", reply_markup=kb)
+    await message.answer(
+        "Rahmat! Endi telefon raqamingizni yuboring yoki pastdagi tugmani bosing:",
+        reply_markup=kb,
+    )
 
 
 @router.message(OnboardState.contact)
@@ -210,8 +248,8 @@ async def onboard_contact(message: Message, state: FSMContext, bot: Bot):
         phone = message.contact.phone_number
     else:
         phone = (message.text or "").strip()
-    
-    if len(phone) < 7:
+
+    if not re.search(r"\d{7,}", phone):
         await message.answer("Iltimos, to'g'ri telefon raqam yuboring.")
         return
 
@@ -228,7 +266,7 @@ async def onboard_contact(message: Message, state: FSMContext, bot: Bot):
         first_name=first_name,
         last_name=last_name,
         username=message.from_user.username or "",
-        phone=phone
+        phone=phone,
     )
     await log_activity(str(message.from_user.id), "onboard", "name_and_phone")
 
@@ -245,22 +283,28 @@ async def onboard_contact(message: Message, state: FSMContext, bot: Bot):
         f"Manzil: {address}\n"
         f"Telefon: {phone_main}\n\n"
         f"Savol yoki so'rov yozing!",
-        reply_markup=ReplyKeyboardRemove()
+        reply_markup=ReplyKeyboardRemove(),
     )
 
 
 @router.message(F.text)
-async def handle_all_messages(message: Message, bot: Bot):
+async def handle_all_messages(message: Message, bot: Bot, state: FSMContext):
+    current_state = await state.get_state()
+    if current_state is not None:
+        return
+
     user = message.from_user
     user_id = str(user.id)
     text_norm = message.text.strip().lower()
 
     if message.chat.type != "private":
         return
-    
+
     ok, missing = await check_subscription(bot, user.id)
     if not ok:
-        text = "⚠️ <b>Botdan foydalanish uchun quyidagi kanallarga obuna bo'ling:</b>\n\n"
+        text = (
+            "⚠️ <b>Botdan foydalanish uchun quyidagi kanallarga obuna bo'ling:</b>\n\n"
+        )
         for ch in missing:
             username = ch.get("username", "")
             title = ch.get("title", "Kanal")
@@ -277,29 +321,32 @@ async def handle_all_messages(message: Message, bot: Bot):
     ai_data = get_booking_data(f"tg_{user_id}")
 
     CONFIRM_WORDS = {
-        'tasdiqlayman', 'tasdiq', 'ha', 'buyurtma tasdiqlayman',
-        'bron tasdiqlayman', 'tasdiql', 'confirm'
+        "tasdiqlayman",
+        "tasdiq",
+        "ha",
+        "buyurtma tasdiqlayman",
+        "bron tasdiqlayman",
+        "tasdiql",
+        "confirm",
     }
-    CANCEL_WORDS = {
-        'bekor', "yo'q", 'yoq', 'cancel', 'bekor qilish', 'rad etaman'
-    }
+    CANCEL_WORDS = {"bekor", "yo'q", "yoq", "cancel", "bekor qilish", "rad etaman"}
 
     # Tasdiqlash
     if ai_data and text_norm in CONFIRM_WORDS:
         order_id = f"ORD-{datetime.now().strftime('%Y%m%d%H%M%S')}"
         order_data = {
-            'id': order_id,
-            'user_id': user_id,
-            'room_id': ai_data.get('room_id', 'unknown'),
-            'room_name': ai_data.get('room_name', 'Xona'),
-            'check_in': ai_data.get('check_in', ''),
-            'check_out': ai_data.get('check_out', ''),
-            'guests': ai_data.get('guests', 1),
-            'total_price': ai_data.get('total_price', 0),
-            'name': ai_data.get('name', ''),
-            'phone': ai_data.get('phone', ''),
-            'notes': '',
-            'source': 'telegram'
+            "id": order_id,
+            "user_id": user_id,
+            "room_id": ai_data.get("room_id", "unknown"),
+            "room_name": ai_data.get("room_name", "Xona"),
+            "check_in": ai_data.get("check_in", ""),
+            "check_out": ai_data.get("check_out", ""),
+            "guests": ai_data.get("guests", 1),
+            "total_price": ai_data.get("total_price", 0),
+            "name": ai_data.get("name", ""),
+            "phone": ai_data.get("phone", ""),
+            "notes": "",
+            "source": "telegram",
         }
         try:
             await create_order(order_data)
@@ -311,6 +358,7 @@ async def handle_all_messages(message: Message, bot: Bot):
         super_admin = os.getenv("SUPER_ADMIN_ID", "")
         admin_ids = _collect_admin_ids(admins, super_admin)
         from app.ai_handler import send_order_to_admins
+
         if admin_ids:
             try:
                 await send_order_to_admins(bot, order_data, admin_ids)
@@ -327,14 +375,16 @@ async def handle_all_messages(message: Message, bot: Bot):
             f"👤 {ai_data.get('name')}\n"
             f"📞 {ai_data.get('phone')}\n\n"
             f"⏳ Tez orada operator siz bilan bog'lanadi!",
-            reply_markup=ReplyKeyboardRemove()
+            reply_markup=ReplyKeyboardRemove(),
         )
         return
 
     # Bekor qilish
     if ai_data and text_norm in CANCEL_WORDS:
         clear_booking_data(f"tg_{user_id}")
-        await message.answer("❌ Bron bekor qilindi.", reply_markup=ReplyKeyboardRemove())
+        await message.answer(
+            "❌ Bron bekor qilindi.", reply_markup=ReplyKeyboardRemove()
+        )
         return
 
     # Asosiy AI bilan so'zlashuv
@@ -344,7 +394,7 @@ async def handle_all_messages(message: Message, bot: Bot):
         user_id=f"tg_{user.id}",
         user_message=message.text,
         user_name=user.first_name or "Mehmon",
-        platform="telegram"
+        platform="telegram",
     )
 
     if ai_data and "Broningiz qabul" not in reply:
@@ -356,3 +406,45 @@ async def handle_all_messages(message: Message, bot: Bot):
         reply = reply + reminder
 
     await message.answer(reply, reply_markup=ReplyKeyboardRemove())
+
+    # PENDING ACTIONS - RASM VA LOKATSIYA YUBORISH
+    pending = await check_pending_actions(f"tg_{user.id}")
+    if pending:
+        if pending.get("action") == "send_location":
+            loc = await get_hotel_location_for_user()
+            if loc:
+                try:
+                    await message.answer_location(loc[0], loc[1])
+                except Exception as e:
+                    log.error(f"Location send error: {e}")
+
+        elif pending.get("action") == "send_photos":
+            room_name = pending.get("room_name", "")
+            if room_name:
+                name, photos = await get_room_photos_for_user(room_name)
+                if photos:
+                    try:
+                        if len(photos) == 1:
+                            await bot.send_photo(
+                                message.chat.id,
+                                photos[0],
+                                caption=f"🏠 {name} xonasi rasmi",
+                            )
+                        else:
+                            media = []
+                            for i, photo_id in enumerate(photos):
+                                if i == 0:
+                                    media.append(
+                                        InputMediaPhoto(
+                                            media=photo_id, caption=f"🏠 {name} xonasi"
+                                        )
+                                    )
+                                else:
+                                    media.append(InputMediaPhoto(media=photo_id))
+                            await bot.send_media_group(message.chat.id, media)
+                    except Exception as e:
+                        log.error(f"Photo send error: {e}")
+                else:
+                    await message.answer(
+                        f"😔 Hozircha {name} xonasining rasmlari mavjud emas."
+                    )
