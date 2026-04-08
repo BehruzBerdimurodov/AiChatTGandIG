@@ -241,9 +241,9 @@ QO'LLANMA:
 - Faqat oddiy matn yoz, markdown ishlatma (** yoki __ yo'q)
 - Bron so'rasa men o'zim boshqaraman, sen shunchaki suhbatni davom ettir
 - Telefon: {hotel_phone}
-- Agar foydalanuvchi xona rasmini so'rasa, "SEND_ROOM_PHOTOS" buyrug'ini yubor
-- Agar foydalanuvchi lokatsiyani so'rasa, "SEND_LOCATION" buyrug'ini yubor
-- Xona nomi so'ralganda: SEND_ROOM_PHOTOS:xona_nomi (masalan: SEND_ROOM_PHOTOS:Standart)"""
+- Agar foydalanuvchi xona rasmini so'rasa, FAQAT shu buyruqni yoz (boshqa hech narsa qo'shma): SEND_ROOM_PHOTOS:xona_nomi — masalan: SEND_ROOM_PHOTOS:Standart
+- Agar foydalanuvchi lokatsiya/manzil/joylashuv/location so'rasa, FAQAT shu buyruqni yoz: SEND_LOCATION
+- Bu buyruqlarni boshqa matn bilan ARALASHTIRIM — faqat alohida yoz"""
 
 
 # ──────────────────────────────────────────────
@@ -678,23 +678,28 @@ async def get_ai_response(
     reply = await _ai_reply(user_id, user_message, platform)
 
     # MAXSUS BUYURUQULARNI TEKSHIRISH
-    if "SEND_LOCATION" in reply:
+    # Lokatsiya buyrug'i (SEND_LOCATION yoki SENDLOCATION)
+    loc_pattern = re.compile(r"SEND_?LOCATION", re.IGNORECASE)
+    if loc_pattern.search(reply):
         PENDING_LOCATION[user_id] = {"action": "send_location"}
-        reply = reply.replace("SEND_LOCATION", "").strip()
+        reply = loc_pattern.sub("", reply).strip()
 
-    if "SEND_ROOM_PHOTOS:" in reply:
-        parts = reply.split("SEND_ROOM_PHOTOS:")
-        room_name = parts[1].strip().split("\n")[0].strip() if len(parts) > 1 else ""
-        reply = parts[0].strip()
-        if room_name:
-            PENDING_ROOM_PHOTOS[user_id] = {
-                "room_name": room_name,
-                "action": "send_photos",
-            }
+    # Xona rasmlari buyrug'i (SEND_ROOM_PHOTOS: yoki SENDROOMPHOTOS: kabi variantlar)
+    photos_pattern = re.compile(r"SEND_?ROOM_?PHOTOS:?\s*(\S+)?", re.IGNORECASE)
+    photos_match = photos_pattern.search(reply)
+    if photos_match:
+        room_name = (photos_match.group(1) or "").strip()
+        reply = photos_pattern.sub("", reply).strip()
+        if not room_name:
+            # Xona nomi topilmasa barcha xonalarni ko'rsatish uchun belgi
+            room_name = "_all_"
+        PENDING_ROOM_PHOTOS[user_id] = {
+            "room_name": room_name,
+            "action": "send_photos",
+        }
 
     if not reply:
-        hotel = await get_hotel()
-        reply = f"Kechirasiz, texnik muammo. Iltimos, to'g'ridan-to'g'ri bog'laning:\n📞 {hotel.get('phone', '+998773397171')}"
+        reply = "Mana siz so'ragan ma'lumot:"
 
     push_message(user_id, "assistant", reply)
     await log_message(user_id, "incoming", user_message, reply)
