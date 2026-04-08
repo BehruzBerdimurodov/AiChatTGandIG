@@ -692,6 +692,10 @@ async def get_ai_response(
                 "action": "send_photos",
             }
 
+    if not reply:
+        hotel = await get_hotel()
+        reply = f"Kechirasiz, texnik muammo. Iltimos, to'g'ridan-to'g'ri bog'laning:\n📞 {hotel.get('phone', '+998773397171')}"
+
     push_message(user_id, "assistant", reply)
     await log_message(user_id, "incoming", user_message, reply)
     await log_activity(user_id, "chat", user_message[:50])

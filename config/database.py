@@ -222,7 +222,11 @@ async def get_hotel() -> Dict:
             return {}
 
 
+_HOTEL_FIELDS = {"name", "address", "phone", "phone_2", "telegram", "instagram", "about", "greeting"}
+
 async def update_hotel(field: str, value: str):
+    if field not in _HOTEL_FIELDS:
+        raise ValueError(f"Invalid hotel field: {field}")
     async with get_db() as db:
         await db.execute(f"UPDATE hotel SET {field} = ?", (value,))
 
@@ -254,7 +258,11 @@ async def add_room(room_id: str, data: Dict):
               data.get('quantity', 1), data.get('room_numbers', '')))
 
 
+_ROOM_FIELDS = {"name", "price", "description", "capacity", "amenities", "active", "quantity", "room_numbers", "photos"}
+
 async def update_room(room_id: str, field: str, value):
+    if field not in _ROOM_FIELDS:
+        raise ValueError(f"Invalid room field: {field}")
     async with get_db() as db:
         await db.execute(f"UPDATE rooms SET {field} = ? WHERE id = ?", (value, room_id))
 
@@ -299,7 +307,11 @@ async def get_user(user_id: str) -> Optional[Dict]:
             return dict(row) if row else None
 
 
+_USER_FIELDS = {"user_type", "first_name", "last_name", "username", "phone", "language", "blocked", "last_activity"}
+
 async def update_user(user_id: str, field: str, value):
+    if field not in _USER_FIELDS:
+        raise ValueError(f"Invalid user field: {field}")
     async with get_db() as db:
         await db.execute(f"UPDATE users SET {field} = ? WHERE user_id = ?", (value, user_id))
 
@@ -355,7 +367,11 @@ async def get_order(order_id: str) -> Optional[Dict]:
             return dict(row) if row else None
 
 
+_ORDER_FIELDS = {"status", "notes", "room_id", "room_name", "check_in", "check_out", "guests", "total_price", "name", "phone", "source"}
+
 async def update_order(order_id: str, field: str, value):
+    if field not in _ORDER_FIELDS:
+        raise ValueError(f"Invalid order field: {field}")
     async with get_db() as db:
         await db.execute(
             f"UPDATE orders SET {field} = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",

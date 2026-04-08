@@ -93,7 +93,10 @@ async def send_start_message(bot: Bot, chat_id: int):
                 continue
             msg_type = payload.get("type")
             if msg_type == "text":
-                await bot.send_message(chat_id, payload.get("text", ""))
+                text_content = payload.get("text", "")
+                if not text_content:
+                    continue
+                await bot.send_message(chat_id, text_content)
                 sent_any = True
             elif msg_type == "photo":
                 await bot.send_photo(
@@ -116,7 +119,10 @@ async def send_start_message(bot: Bot, chat_id: int):
                 )
                 sent_any = True
             elif msg_type == "location":
-                await bot.send_location(chat_id, payload.get("lat"), payload.get("lng"))
+                lat, lng = payload.get("lat"), payload.get("lng")
+                if lat is None or lng is None:
+                    continue
+                await bot.send_location(chat_id, lat, lng)
                 sent_any = True
     except Exception as e:
         log.error(f"Error sending start messages: {e}")
@@ -396,6 +402,9 @@ async def handle_all_messages(message: Message, bot: Bot, state: FSMContext):
         user_name=user.first_name or "Mehmon",
         platform="telegram",
     )
+
+    if not reply:
+        reply = "Kechirasiz, javob olishda xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring."
 
     if ai_data and "Broningiz qabul" not in reply:
         reminder = (

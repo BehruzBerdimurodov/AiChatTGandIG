@@ -574,14 +574,20 @@ async def broadcast_send(message: Message, state: FSMContext, bot: Bot):
         await state.clear()
         return
 
+    if not message.text:
+        await message.answer("❌ Faqat matn xabar yuboring.")
+        await state.clear()
+        return
+
     await state.clear()
     users = await get_all_users()
     sent = 0
 
     for user in users:
         try:
+            uid = user.get("user_id", "")
             await bot.send_message(
-                int(user.get("user_id", 0)),
+                int(uid),
                 f"📢 <b>Marco Polo Hotel dan:</b>\n\n{message.text}",
             )
             sent += 1
@@ -870,6 +876,10 @@ async def save_room_edit(message: Message, state: FSMContext):
     room_id = data.get("room_id")
     field = data.get("field")
 
+    if not message.text and step in ("room_name", "room_price", "room_desc", "room_capacity", "room_quantity", "room_numbers"):
+        await message.answer("❌ Faqat matn yuboring.")
+        return
+
     if step == "room_name":
         room_name = message.text.strip()
         await state.update_data(room_name=room_name, step="room_price")
@@ -927,6 +937,9 @@ async def save_room_edit(message: Message, state: FSMContext):
         await state.clear()
         await message.answer("✅ Xona qo'shildi!")
     elif room_id and field:
+        if not message.text:
+            await message.answer("❌ Faqat matn yuboring.")
+            return
         value = message.text.strip()
         if field == "price":
             try:
@@ -1018,7 +1031,7 @@ async def hotel_info(callback: CallbackQuery):
             pass
 
 
-@router.callback_query(F.data.startswith("edit_hotel_"))
+@router.callback_query(F.data.startswith("edit_hotel_") & (F.data != "edit_hotel_location"))
 async def edit_hotel(callback: CallbackQuery, state: FSMContext):
     if not await is_admin(str(callback.from_user.id), os.getenv("SUPER_ADMIN_ID")):
         return
@@ -1048,6 +1061,10 @@ async def save_hotel_edit(message: Message, state: FSMContext):
     field = data.get("hotel_field")
 
     if field:
+        if not message.text:
+            await state.clear()
+            await message.answer("❌ Faqat matn yuboring.")
+            return
         await update_hotel(field, message.text.strip())
 
     await state.clear()
@@ -1122,6 +1139,10 @@ async def save_channel(message: Message, state: FSMContext, bot: Bot):
     step = data.get("step")
 
     if step == "add_channel":
+        if not message.text:
+            await state.clear()
+            await message.answer("❌ Faqat matn yuboring.")
+            return
         text = message.text.strip()
         is_post = text.startswith("post:")
         if is_post:
@@ -1386,11 +1407,19 @@ async def save_admin(message: Message, state: FSMContext):
     data = await state.get_data()
 
     if data.get("step") == "add_admin":
+        if not message.text:
+            await state.clear()
+            await message.answer("❌ Faqat matn yuboring.")
+            return
         admin_id = message.text.strip()
         await db_add_admin(admin_id)
         await state.clear()
         await message.answer(f"✅ Admin qo'shildi: {admin_id}")
     elif data.get("step") == "remove_admin":
+        if not message.text:
+            await state.clear()
+            await message.answer("❌ Faqat matn yuboring.")
+            return
         admin_id = message.text.strip()
         await db_remove_admin(admin_id)
         await state.clear()
@@ -1461,6 +1490,9 @@ async def available_rooms_show(message: Message, state: FSMContext):
         await state.clear()
         return
 
+    if not message.text:
+        await message.answer("❌ Faqat matn yuboring.")
+        return
     text = message.text.strip()
     parts = text.split()
     if len(parts) != 2:
@@ -1618,7 +1650,7 @@ async def delete_start_message(message: Message, state: FSMContext):
         messages = []
 
     try:
-        idx = int(message.text.strip()) - 1
+        idx = int((message.text or "").strip()) - 1
     except Exception:
         await message.answer("Raqam yuboring. Masalan: 1")
         return
@@ -1715,7 +1747,7 @@ async def _collect_start_media_group(message: Message, state: FSMContext) -> Non
         messages.append(payload)
         await set_setting("start_messages", json.dumps(messages, ensure_ascii=False))
         await state.clear()
-        await message.answer("вњ… Start xabar qo'shildi.")
+        await message.answer("✅ Start xabar qo'shildi.")
 
     group["task"] = asyncio.create_task(finalize())
 
