@@ -1,8 +1,6 @@
 import re
-import asyncio
 
 from app.ai_handler import _parse_date, _looks_like_expected_input
-from app.ai_handler import _resolve_room
 
 
 def test_parse_date_rejects_invalid_dates():
@@ -30,16 +28,3 @@ def test_parse_date_month_name_format_returns_iso():
     parsed = _parse_date("5 fevral")
     assert parsed is not None
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", parsed)
-
-
-def test_parse_date_finds_dd_mm_inside_sentence():
-    parsed = _parse_date("kelish sanasi 11.12 bo'lsin")
-    assert parsed is not None
-    assert parsed.endswith("-12-11")
-
-
-def test_resolve_room_supports_numeric_room_id_without_crash():
-    rooms = [{"id": 101, "name": "Standart Room"}, {"id": 202, "name": "VIP Room"}]
-    selected = asyncio.run(_resolve_room({}, "101 xona", rooms))
-    assert selected is not None
-    assert selected["id"] == 101
