@@ -103,6 +103,17 @@ BOOKING_CONTINUE_KEYWORDS = {
     "ha",
 }
 
+ROOM_RECOMMENDATION_KEYWORDS = {
+    "tavsiya",
+    "qaysi",
+    "qaysinisi",
+    "maslahat",
+    "recommended",
+    "recommend",
+    "which one",
+    "qanaqasi",
+}
+
 # ──────────────────────────────────────────────
 # SANA PARSE
 # ──────────────────────────────────────────────
@@ -150,7 +161,13 @@ MONTH_MAP = {
 }
 
 
-def _normalize_date(year: int, month: int, day: int, today: datetime) -> str | None:
+def _normalize_date(
+    year: int,
+    month: int,
+    day: int,
+    today: datetime,
+    allow_rollover: bool = False,
+) -> str | None:
     """Sana qismlarini tekshiradi va YYYY-MM-DD qaytaradi."""
     try:
         dt = datetime(year, month, day)
@@ -158,7 +175,7 @@ def _normalize_date(year: int, month: int, day: int, today: datetime) -> str | N
         return None
 
     # Foydalanuvchi yil kiritmasa, o'tib ketgan sanani keyingi yilga o'tkazamiz
-    if year == today.year and dt.date() < today.date():
+    if allow_rollover and year == today.year and dt.date() < today.date():
         try:
             dt = datetime(year + 1, month, day)
         except ValueError:
@@ -179,19 +196,19 @@ def _parse_date(text: str) -> str | None:
     m = re.search(r"(\d{4})[-./](\d{1,2})[-./](\d{1,2})", text)
     if m:
         year, month, day = int(m.group(1)), int(m.group(2)), int(m.group(3))
-        return _normalize_date(year, month, day, today)
+        return _normalize_date(year, month, day, today, allow_rollover=False)
 
     # DD.MM.YYYY yoki DD/MM/YYYY
     m = re.search(r"(\d{1,2})[-./](\d{1,2})[-./](\d{4})", text)
     if m:
         day, month, year = int(m.group(1)), int(m.group(2)), int(m.group(3))
-        return _normalize_date(year, month, day, today)
+        return _normalize_date(year, month, day, today, allow_rollover=False)
 
     # DD.MM (yil yo'q)
-    m = re.search(r"(\d{1,2})[-./](\d{1,2})$", text)
+    m = re.search(r"\b(\d{1,2})[-./](\d{1,2})\b", text)
     if m:
         day, month = int(m.group(1)), int(m.group(2))
-        return _normalize_date(year, month, day, today)
+        return _normalize_date(year, month, day, today, allow_rollover=True)
 
     # "12 mart", "mart 12", "12-mart"
     for month_name, month_num in MONTH_MAP.items():
@@ -199,14 +216,14 @@ def _parse_date(text: str) -> str | None:
         m = re.search(rf"(\d{{1,2}})\s*[-]?\s*{month_name}", text)
         if m:
             day = int(m.group(1))
-            normalized = _normalize_date(year, month_num, day, today)
+            normalized = _normalize_date(year, month_num, day, today, allow_rollover=True)
             if normalized:
                 return normalized
         # "mart 12"
         m = re.search(rf"{month_name}\s*[-]?\s*(\d{{1,2}})", text)
         if m:
             day = int(m.group(1))
-            normalized = _normalize_date(year, month_num, day, today)
+            normalized = _normalize_date(year, month_num, day, today, allow_rollover=True)
             if normalized:
                 return normalized
 
@@ -447,6 +464,71 @@ def _looks_like_expected_input(
     return False
 
 
+def _is_recommendation_request(text: str) -> bool:
+    normalized = text.strip().lower()
+    return any(keyword in normalized for keyword in ROOM_RECOMMENDATION_KEYWORDS)
+
+
+async def _booking_ai_guidance(
+    user_id: str,
+    user_message: str,
+    missing_field: str | None,
+    draft: dict,
+    rooms: list[dict],
+    platform: str,
+) -> str:
+    field_label = {
+        "room": "xona tanlovi",
+        "check_in": "kelish sanasi",
+        "check_out": "ketish sanasi",
+        "guests": "mehmonlar soni",
+        "phone": "telefon raqami",
+    }.get(missing_field, "ma'lumot")
+
+    # Room bosqichida foydalanuvchi "qaysi yaxshi?" desa AI tavsiya bersin
+    if missing_field == "room" and _is_recommendation_request(user_message):
+        short_rooms = []
+        for r in rooms:
+            price = f"{r.get('price', 0):,}".replace(",", " ")
+            short_rooms.append(
+                f"{r.get('name', 'Xona')}: {price} so'm/kun, "
+                f"sig'im {r.get('capacity', 2)} kishi, {r.get('description', '')}"
+            )
+        rooms_brief = "\n".join(f"- {row}" for row in short_rooms)
+        ai_text = await _ai_reply(
+            user_id=user_id,
+            user_message=user_message,
+            platform=platform,
+            extra_instruction=(
+                "Foydalanuvchi bron jarayonida xona tanlayapti. "
+                "Xonalardan 1-2 mos variantni tavsiya qiling va qisqa sabab yozing. "
+                "Javob oxirida aniq tanlov so'rang.\n\n"
+                f"Bron draft: {json.dumps(draft, ensure_ascii=False)}\n"
+                f"Mavjud xonalar:\n{rooms_brief}"
+            ),
+        )
+        return (
+            f"{ai_text}\n\n"
+            "Tanlagan xonangiz nomini yoki raqamini yuboring (masalan: 2 yoki VIP Room)."
+        )
+
+    # Qolgan holatlarda qattiq generic javob o'rniga maydon bo'yicha yo'riqnoma
+    if missing_field == "guests":
+        return (
+            "🙂 Tushunaman. Bu bosqichda mehmonlar soni kerak.\n"
+            f"Tanlangan xona {draft.get('room_capacity', 2)} kishigacha mo'ljallangan.\n"
+            "Iltimos, faqat raqam yuboring (masalan: 2).\n"
+            "Yoki boshqa xona tanlash uchun: boshqa xona deb yozing."
+        )
+
+    return (
+        "🧾 Sizda tugallanmagan bron mavjud.\n"
+        f"Hozir kutilayotgan ma'lumot: {field_label}.\n\n"
+        "Davom ettirish uchun kerakli ma'lumotni yuboring.\n"
+        "Yoki bronni bekor qilish uchun: Bekor deb yozing."
+    )
+
+
 async def _resolve_room(draft: dict, user_message: str, rooms: list) -> dict | None:
     """Foydalanuvchi xabaridan xonani topish"""
     text = user_message.strip().lower()
@@ -477,7 +559,8 @@ async def _resolve_room(draft: dict, user_message: str, rooms: list) -> dict | N
 
     # Nom bo'yicha qidirish
     for r in rooms:
-        if r["name"].lower() in text or r["id"].lower() in text:
+        room_id_text = str(r.get("id", "")).lower()
+        if r["name"].lower() in text or (room_id_text and room_id_text in text):
             return r
         # Qisqa nom: "standart", "delux", "suite", "vip", "family", "premium"
         short = r["name"].lower().split()[0]
@@ -551,18 +634,21 @@ async def _handle_booking_flow(
             pass
         elif not _is_cancel_intent(user_message) and not _is_booking_intent(user_message):
             if not _looks_like_expected_input(missing_now, user_message, rooms_all):
-                field_label = {
-                    "room": "xona tanlovi",
-                    "check_in": "kelish sanasi",
-                    "check_out": "ketish sanasi",
-                    "guests": "mehmonlar soni",
-                    "phone": "telefon raqami",
-                }.get(missing_now, "ma'lumot")
-                return (
-                    "🧾 Sizda tugallanmagan bron mavjud.\n"
-                    f"Hozir kutilayotgan ma'lumot: {field_label}.\n\n"
-                    "Davom ettirish uchun kerakli ma'lumotni yuboring.\n"
-                    "Yoki bronni bekor qilish uchun: Bekor deb yozing."
+                if missing_now == "guests" and "boshqa xona" in normalized_message:
+                    draft["room_id"] = None
+                    draft["room_name"] = None
+                    draft["room_price"] = None
+                    draft["room_capacity"] = None
+                    BOOKING_DRAFT[user_id] = draft
+                    return _format_room_list(rooms_all)
+
+                return await _booking_ai_guidance(
+                    user_id=user_id,
+                    user_message=user_message,
+                    missing_field=missing_now,
+                    draft=draft,
+                    rooms=rooms_all,
+                    platform=platform,
                 )
 
     missing = _next_missing(draft)
