@@ -73,6 +73,12 @@ def format_price(price: int) -> str:
     return f"{price:,}".replace(",", " ")
 
 
+def admin_home_button() -> list[InlineKeyboardButton]:
+    return [
+        InlineKeyboardButton(text="🔙 Admin panelga qaytish", callback_data="admin_back")
+    ]
+
+
 class AdminInput(StatesGroup):
     waiting = State()
 
@@ -264,7 +270,7 @@ async def show_stats(callback: CallbackQuery):
 """,
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[
-                [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")]
+                admin_home_button()
             ]
         ),
     )
@@ -286,7 +292,7 @@ async def orders_menu(callback: CallbackQuery):
                 ),
             ],
             [InlineKeyboardButton(text="📋 Barchasi", callback_data="orders_all")],
-            [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")],
+            admin_home_button(),
         ]
     )
 
@@ -631,7 +637,10 @@ async def admin_back(callback: CallbackQuery):
         ]
     )
 
-    await callback.message.edit_text("⚙️ <b>Admin Panel</b>", reply_markup=keyboard)
+    await callback.message.edit_text(
+        "⚙️ <b>Admin Panel</b>\n\nKerakli bo'limni tanlang:",
+        reply_markup=keyboard,
+    )
 
 
 @router.callback_query(F.data == "admin_rooms_list")
@@ -655,7 +664,7 @@ async def rooms_manage(callback: CallbackQuery):
     buttons.append(
         [InlineKeyboardButton(text="➕ Yangi xona", callback_data="add_room_start")]
     )
-    buttons.append([InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")])
+    buttons.append(admin_home_button())
 
     await callback.message.edit_text(
         "🏠 <b>Xonalar boshqaruvi:</b>",
@@ -1019,7 +1028,7 @@ async def hotel_info(callback: CallbackQuery):
                         text="📷 Instagram", callback_data="edit_hotel_instagram"
                     ),
                 ],
-                [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")],
+                admin_home_button(),
             ]
         ),
     )
@@ -1096,7 +1105,7 @@ async def channels_manage(callback: CallbackQuery):
                 )
             ],
             [InlineKeyboardButton(text="🗑 O'chirish", callback_data="remove_channel")],
-            [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")],
+            admin_home_button(),
         ]
     )
     await callback.message.edit_text(text, reply_markup=keyboard)
@@ -1215,7 +1224,7 @@ async def post_create(callback: CallbackQuery):
         inline_keyboard=[
             [InlineKeyboardButton(text="🤖 AI bilan yozish", callback_data="post_ai")],
             [InlineKeyboardButton(text="✍️ Qo'lda yozish", callback_data="post_manual")],
-            [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")],
+            admin_home_button(),
         ]
     )
 
@@ -1445,7 +1454,7 @@ async def available_rooms_start(callback: CallbackQuery, state: FSMContext):
                 ),
             ],
             [InlineKeyboardButton(text="7 kun", callback_data="available_rooms_week")],
-            [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")],
+            admin_home_button(),
         ]
     )
     await callback.message.edit_text(
@@ -1542,7 +1551,7 @@ async def start_message(callback: CallbackQuery, state: FSMContext):
                     text="🗑 O'chirish", callback_data="start_message_delete"
                 )
             ],
-            [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")],
+            admin_home_button(),
         ]
     )
 

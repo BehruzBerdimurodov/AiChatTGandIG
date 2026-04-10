@@ -12,6 +12,7 @@ from aiogram import Router, F, Bot
 from aiogram.filters import CommandStart
 from aiogram.types import (
     Message,
+    CallbackQuery,
     ReplyKeyboardRemove,
     ReplyKeyboardMarkup,
     KeyboardButton,
@@ -25,6 +26,7 @@ from app.ai_handler import (
     get_ai_response,
     get_booking_data,
     clear_booking_data,
+    reset_user_session,
     check_pending_actions,
     get_room_photos_for_user,
     get_hotel_location_for_user,
@@ -142,6 +144,8 @@ async def cmd_start(message: Message, bot: Bot, state: FSMContext):
     if message.chat.type != "private":
         return
 
+    reset_user_session(f"tg_{user_id}")
+
     if user_id in ADMIN_IN_ADMIN_MODE:
         ADMIN_IN_ADMIN_MODE.discard(user_id)
 
@@ -215,6 +219,25 @@ async def cmd_start(message: Message, bot: Bot, state: FSMContext):
     )
 
 
+@router.callback_query(F.data == "back_main")
+async def back_to_main_menu(callback: CallbackQuery, state: FSMContext):
+    if callback.message.chat.type != "private":
+        return
+
+    await state.clear()
+    reset_user_session(f"tg_{callback.from_user.id}")
+    hotel = await get_hotel()
+    address = hotel.get("address", "Do'mbirobod Naqqoshlik 121A")
+    phone = hotel.get("phone", "+998773397171")
+
+    await callback.message.edit_text(
+        "🏠 Asosiy holatga qaytdingiz.\n\n"
+        f"Manzil: {address}\n"
+        f"Telefon: {phone}\n\n"
+        "Savolingizni yozing, men yordam beraman."
+    )
+
+
 @router.message(OnboardState.name)
 async def onboard_name(message: Message, state: FSMContext):
     full_name = (message.text or "").strip()
@@ -277,6 +300,7 @@ async def onboard_contact(message: Message, state: FSMContext, bot: Bot):
     await log_activity(str(message.from_user.id), "onboard", "name_and_phone")
 
     await state.clear()
+    reset_user_session(f"tg_{message.from_user.id}")
     hotel = await get_hotel()
 
     address = hotel.get("address", "Do'mbirobod Naqqoshlik 121A")

@@ -82,6 +82,27 @@ BOOKING_CANCEL_KEYWORDS = [
     "bron toxtat",
 ]
 
+GREETING_KEYWORDS = {
+    "salom",
+    "assalomu alaykum",
+    "assalom",
+    "hello",
+    "hi",
+    "privet",
+    "alaykum",
+}
+
+BOOKING_CONTINUE_KEYWORDS = {
+    "davom",
+    "davom et",
+    "davom etamiz",
+    "continue",
+    "ok",
+    "xo'p",
+    "hop",
+    "ha",
+}
+
 # ──────────────────────────────────────────────
 # SANA PARSE
 # ──────────────────────────────────────────────
@@ -129,6 +150,22 @@ MONTH_MAP = {
 }
 
 
+def _normalize_date(year: int, month: int, day: int, today: datetime) -> str | None:
+    """Sana qismlarini tekshiradi va YYYY-MM-DD qaytaradi."""
+    try:
+        dt = datetime(year, month, day)
+    except ValueError:
+        return None
+
+    # Foydalanuvchi yil kiritmasa, o'tib ketgan sanani keyingi yilga o'tkazamiz
+    if year == today.year and dt.date() < today.date():
+        try:
+            dt = datetime(year + 1, month, day)
+        except ValueError:
+            return None
+    return dt.strftime("%Y-%m-%d")
+
+
 def _parse_date(text: str) -> str | None:
     """
     Matndan sanani YYYY-MM-DD formatida qaytaradi.
@@ -141,22 +178,20 @@ def _parse_date(text: str) -> str | None:
     # YYYY-MM-DD
     m = re.search(r"(\d{4})[-./](\d{1,2})[-./](\d{1,2})", text)
     if m:
-        return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+        year, month, day = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        return _normalize_date(year, month, day, today)
 
     # DD.MM.YYYY yoki DD/MM/YYYY
     m = re.search(r"(\d{1,2})[-./](\d{1,2})[-./](\d{4})", text)
     if m:
-        return f"{m.group(3)}-{int(m.group(2)):02d}-{int(m.group(1)):02d}"
+        day, month, year = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        return _normalize_date(year, month, day, today)
 
     # DD.MM (yil yo'q)
     m = re.search(r"(\d{1,2})[-./](\d{1,2})$", text)
     if m:
         day, month = int(m.group(1)), int(m.group(2))
-        # Kelajakdagi yilni topish
-        dt = datetime(year, month, day)
-        if dt.date() < today.date():
-            dt = datetime(year + 1, month, day)
-        return dt.strftime("%Y-%m-%d")
+        return _normalize_date(year, month, day, today)
 
     # "12 mart", "mart 12", "12-mart"
     for month_name, month_num in MONTH_MAP.items():
@@ -164,24 +199,16 @@ def _parse_date(text: str) -> str | None:
         m = re.search(rf"(\d{{1,2}})\s*[-]?\s*{month_name}", text)
         if m:
             day = int(m.group(1))
-            try:
-                dt = datetime(year, month_num, day)
-                if dt.date() < today.date():
-                    dt = datetime(year + 1, month_num, day)
-                return dt.strftime("%Y-%m-%d")
-            except ValueError:
-                continue
+            normalized = _normalize_date(year, month_num, day, today)
+            if normalized:
+                return normalized
         # "mart 12"
         m = re.search(rf"{month_name}\s*[-]?\s*(\d{{1,2}})", text)
         if m:
             day = int(m.group(1))
-            try:
-                dt = datetime(year, month_num, day)
-                if dt.date() < today.date():
-                    dt = datetime(year + 1, month_num, day)
-                return dt.strftime("%Y-%m-%d")
-            except ValueError:
-                continue
+            normalized = _normalize_date(year, month_num, day, today)
+            if normalized:
+                return normalized
 
     return None
 
@@ -197,17 +224,37 @@ async def _build_system_prompt(platform: str = "telegram") -> str:
     loc = await get_hotel_location()
 
     room_lines = []
+    room_facts = []
     for r in rooms:
         price = f"{r['price']:,}".replace(",", " ")
+        amenities = (r.get("amenities") or "").replace("|", ", ")
+        room_numbers = r.get("room_numbers", "")
         room_lines.append(
             f"- {r['name']}: {price} so'm/kun | {r['description']} | "
             f"{r.get('capacity', 2)} kishi | {r.get('quantity', 1)} ta mavjud"
+            f"{f' | Qulayliklar: {amenities}' if amenities else ''}"
+            f"{f' | Raqamlar: {room_numbers}' if room_numbers else ''}"
+        )
+        room_facts.append(
+            {
+                "id": r.get("id"),
+                "name": r.get("name"),
+                "price_per_day": r.get("price"),
+                "capacity": r.get("capacity"),
+                "quantity": r.get("quantity"),
+                "description": r.get("description"),
+                "amenities": r.get("amenities"),
+                "room_numbers": r.get("room_numbers"),
+            }
         )
     rooms_text = "\n".join(room_lines) if room_lines else "Xonalar yangilanmoqda"
+    room_facts_json = json.dumps(room_facts, ensure_ascii=False)
 
     hotel_phone = hotel.get("phone", "+998773397171")
     hotel_address = hotel.get("address", "Do'mbirobod Naqqoshlik 121A")
     hotel_telegram = hotel.get("telegram", "@Marcopolohotel_1")
+    hotel_instagram = hotel.get("instagram", "")
+    hotel_about = hotel.get("about", "")
     bugun = datetime.now().strftime("%Y-%m-%d, %A")
 
     loc_info = ""
@@ -226,9 +273,14 @@ Nomi: Marco Polo Hotel
 Manzil: {hotel_address}, Toshkent
 Telefon: {hotel_phone}
 Telegram: {hotel_telegram}{loc_info}
+Instagram: {hotel_instagram or "mavjud emas"}
+Qo'shimcha ma'lumot: {hotel_about or "Admin paneldagi so'nggi ma'lumotlardan foydalan"}
 
 XONALAR:
 {rooms_text}
+
+XONALAR_JSON (aniq faktlar, javobda shu ma'lumotni asos qilib ol):
+{room_facts_json}
 
 SOATLIK IJARA: 200 000 - 250 000 so'm
 
@@ -357,6 +409,44 @@ def _format_room_list(rooms: list) -> str:
     return "\n".join(lines)
 
 
+def _looks_like_expected_input(
+    missing_field: str | None, user_message: str, rooms: list[dict]
+) -> bool:
+    text = user_message.strip().lower()
+    if not missing_field:
+        return False
+
+    if missing_field == "room":
+        if re.match(r"^\d+\b", text):
+            return True
+        for room in rooms:
+            room_name = room.get("name", "").lower()
+            if room_name and room_name in text:
+                return True
+            short = room_name.split()[0] if room_name else ""
+            if short and short in text:
+                return True
+        return False
+
+    if missing_field in {"check_in", "check_out"}:
+        return _parse_date(text) is not None
+
+    if missing_field == "guests":
+        if re.search(r"\d{4}", text):  # sana bo'lishi mumkin
+            return False
+        if any(month in text for month in MONTH_MAP):
+            return False
+        return re.search(r"\b\d+\b", text) is not None
+
+    if missing_field == "phone":
+        normalized = text.replace(" ", "").replace("-", "")
+        if not normalized.startswith("+"):
+            normalized = "+" + normalized
+        return re.fullmatch(r"\+\d{7,15}", normalized) is not None
+
+    return False
+
+
 async def _resolve_room(draft: dict, user_message: str, rooms: list) -> dict | None:
     """Foydalanuvchi xabaridan xonani topish"""
     text = user_message.strip().lower()
@@ -417,6 +507,13 @@ async def _handle_booking_flow(
     Aks holda None qaytaradi (AI ga uzatiladi).
     """
     draft = BOOKING_DRAFT.get(user_id)
+    normalized_message = user_message.strip().lower()
+
+    # Salomlashish bilan qayta boshlasa eski draftni tozalaymiz
+    if draft is not None and normalized_message in GREETING_KEYWORDS:
+        BOOKING_DRAFT.pop(user_id, None)
+        BOOKING_STORE.pop(user_id, None)
+        return None
 
     # Bron jarayoni aktiv emas va intent yo'q — AI ga uzat
     if draft is None and not _is_booking_intent(user_message):
@@ -447,6 +544,27 @@ async def _handle_booking_flow(
                     draft["phone"] = db_user["phone"]
 
     rooms_all = await get_rooms(only_active=True)
+
+    if draft is not None:
+        missing_now = _next_missing(draft)
+        if normalized_message in BOOKING_CONTINUE_KEYWORDS:
+            pass
+        elif not _is_cancel_intent(user_message) and not _is_booking_intent(user_message):
+            if not _looks_like_expected_input(missing_now, user_message, rooms_all):
+                field_label = {
+                    "room": "xona tanlovi",
+                    "check_in": "kelish sanasi",
+                    "check_out": "ketish sanasi",
+                    "guests": "mehmonlar soni",
+                    "phone": "telefon raqami",
+                }.get(missing_now, "ma'lumot")
+                return (
+                    "🧾 Sizda tugallanmagan bron mavjud.\n"
+                    f"Hozir kutilayotgan ma'lumot: {field_label}.\n\n"
+                    "Davom ettirish uchun kerakli ma'lumotni yuboring.\n"
+                    "Yoki bronni bekor qilish uchun: Bekor deb yozing."
+                )
+
     missing = _next_missing(draft)
 
     # ── XONA TANLASH ────────────────────────────────────
@@ -685,7 +803,9 @@ async def get_ai_response(
         reply = loc_pattern.sub("", reply).strip()
 
     # Xona rasmlari buyrug'i (SEND_ROOM_PHOTOS: yoki SENDROOMPHOTOS: kabi variantlar)
-    photos_pattern = re.compile(r"SEND_?ROOM_?PHOTOS:?\s*(\S+)?", re.IGNORECASE)
+    photos_pattern = re.compile(
+        r"SEND_?ROOM_?PHOTOS:?\s*([^\n\r]+)?", re.IGNORECASE
+    )
     photos_match = photos_pattern.search(reply)
     if photos_match:
         room_name = (photos_match.group(1) or "").strip()
@@ -754,6 +874,15 @@ def get_booking_data(user_id: str) -> dict | None:
 
 def clear_booking_data(user_id: str):
     BOOKING_STORE.pop(str(user_id), None)
+
+
+def reset_user_session(user_id: str):
+    uid = str(user_id)
+    BOOKING_STORE.pop(uid, None)
+    BOOKING_DRAFT.pop(uid, None)
+    PENDING_ROOM_PHOTOS.pop(uid, None)
+    PENDING_LOCATION.pop(uid, None)
+    clear_history(uid)
 
 
 async def generate_post(topic: str, hotel_name: str) -> str:
