@@ -74,8 +74,14 @@ BOOKING_INTENT_KEYWORDS = [
 ]
 
 BOOKING_CANCEL_KEYWORDS = [
+    "bekor",
+    "bekor qil",
+    "bekor qiling",
     "bron bekor",
     "bekor qilish",
+    "otkaz",
+    "otkaz qil",
+    "otkazish",
     "bron kerak emas",
     "rad etaman",
     "bron cancel",
@@ -112,6 +118,18 @@ ROOM_RECOMMENDATION_KEYWORDS = {
     "recommend",
     "which one",
     "qanaqasi",
+}
+
+ROOM_INFO_KEYWORDS = {
+    "rasm",
+    "foto",
+    "photo",
+    "narx",
+    "qancha",
+    "price",
+    "qulaylik",
+    "amenities",
+    "xona haqida",
 }
 
 # ──────────────────────────────────────────────
@@ -469,6 +487,11 @@ def _is_recommendation_request(text: str) -> bool:
     return any(keyword in normalized for keyword in ROOM_RECOMMENDATION_KEYWORDS)
 
 
+def _is_room_info_request(text: str) -> bool:
+    normalized = text.strip().lower()
+    return any(keyword in normalized for keyword in ROOM_INFO_KEYWORDS)
+
+
 async def _booking_ai_guidance(
     user_id: str,
     user_message: str,
@@ -477,13 +500,21 @@ async def _booking_ai_guidance(
     rooms: list[dict],
     platform: str,
 ) -> str:
-    field_label = {
+    field_label_map = {
         "room": "xona tanlovi",
         "check_in": "kelish sanasi",
         "check_out": "ketish sanasi",
         "guests": "mehmonlar soni",
         "phone": "telefon raqami",
-    }.get(missing_field, "ma'lumot")
+    }
+    field_label = field_label_map.get(missing_field, "ma'lumot")
+    field_hint = {
+        "room": "xona nomi yoki raqami (masalan: 2 yoki VIP Room)",
+        "check_in": "kelish sanasi (masalan: 10 may yoki 2026-05-10)",
+        "check_out": "ketish sanasi (masalan: 12 may yoki 2026-05-12)",
+        "guests": "mehmonlar soni raqamda (masalan: 2)",
+        "phone": "telefon raqami (+998901234567)",
+    }.get(missing_field, field_label)
 
     # Room bosqichida foydalanuvchi "qaysi yaxshi?" desa AI tavsiya bersin
     if missing_field == "room" and _is_recommendation_request(user_message):
@@ -512,14 +543,43 @@ async def _booking_ai_guidance(
             "Tanlagan xonangiz nomini yoki raqamini yuboring (masalan: 2 yoki VIP Room)."
         )
 
-    # Qolgan holatlarda qattiq generic javob o'rniga maydon bo'yicha yo'riqnoma
-    if missing_field == "guests":
-        return (
-            "🙂 Tushunaman. Bu bosqichda mehmonlar soni kerak.\n"
-            f"Tanlangan xona {draft.get('room_capacity', 2)} kishigacha mo'ljallangan.\n"
-            "Iltimos, faqat raqam yuboring (masalan: 2).\n"
-            "Yoki boshqa xona tanlash uchun: boshqa xona deb yozing."
+    # Sana/raqam kutilayotgan paytda foydalanuvchi xona haqida savol bersa,
+    # AI javob berib keyin jarayonni davom ettirishni eslatsin.
+    if missing_field in {"check_in", "check_out", "guests", "phone"} and _is_room_info_request(
+        user_message
+    ):
+        ai_text = await _ai_reply(
+            user_id=user_id,
+            user_message=user_message,
+            platform=platform,
+            extra_instruction=(
+                "Foydalanuvchi bron jarayonida, lekin hozir boshqa savol berdi. "
+                "Savolga aniq javob bering va oxirida bronni davom ettirish uchun "
+                "kutilayotgan maydonni bitta jumlada eslating."
+            ),
         )
+        return (
+            f"{ai_text}\n\n"
+            f"Bronni davom ettiramiz: iltimos, {field_label}ni yuboring."
+        )
+
+    # Qolgan holatlarda ham AI bilan odamga o'xshash, kontekstli javob beramiz
+    # va bron oqimidan chiqib ketmasdan keyingi qadamni eslatamiz.
+    if missing_field in {"room", "check_in", "check_out", "guests", "phone"}:
+        ai_text = await _ai_reply(
+            user_id=user_id,
+            user_message=user_message,
+            platform=platform,
+            extra_instruction=(
+                "Foydalanuvchi bron jarayonida. Savoliga insoniy, samimiy va tabiiy "
+                "ohangda javob bering, bir xil gapni takrorlamang. "
+                "Javob oxirida bronni davom ettirish uchun aniq bitta keyingi qadamni yozing. "
+                "Muhim: bronni AI o'zi yakunlamasin, faqat foydalanuvchini booking stepga qaytarsin. "
+                f"Hozir kutilayotgan maydon: {field_label}. "
+                f"Foydalanuvchidan so'raladigan format: {field_hint}."
+            ),
+        )
+        return f"{ai_text}\n\nBronni davom ettiramiz: iltimos, {field_hint}ni yuboring."
 
     return (
         "🧾 Sizda tugallanmagan bron mavjud.\n"
