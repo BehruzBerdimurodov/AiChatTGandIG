@@ -161,7 +161,13 @@ MONTH_MAP = {
 }
 
 
-def _normalize_date(year: int, month: int, day: int, today: datetime) -> str | None:
+def _normalize_date(
+    year: int,
+    month: int,
+    day: int,
+    today: datetime,
+    allow_rollover: bool = False,
+) -> str | None:
     """Sana qismlarini tekshiradi va YYYY-MM-DD qaytaradi."""
     try:
         dt = datetime(year, month, day)
@@ -169,7 +175,7 @@ def _normalize_date(year: int, month: int, day: int, today: datetime) -> str | N
         return None
 
     # Foydalanuvchi yil kiritmasa, o'tib ketgan sanani keyingi yilga o'tkazamiz
-    if year == today.year and dt.date() < today.date():
+    if allow_rollover and year == today.year and dt.date() < today.date():
         try:
             dt = datetime(year + 1, month, day)
         except ValueError:
@@ -190,19 +196,19 @@ def _parse_date(text: str) -> str | None:
     m = re.search(r"(\d{4})[-./](\d{1,2})[-./](\d{1,2})", text)
     if m:
         year, month, day = int(m.group(1)), int(m.group(2)), int(m.group(3))
-        return _normalize_date(year, month, day, today)
+        return _normalize_date(year, month, day, today, allow_rollover=False)
 
     # DD.MM.YYYY yoki DD/MM/YYYY
     m = re.search(r"(\d{1,2})[-./](\d{1,2})[-./](\d{4})", text)
     if m:
         day, month, year = int(m.group(1)), int(m.group(2)), int(m.group(3))
-        return _normalize_date(year, month, day, today)
+        return _normalize_date(year, month, day, today, allow_rollover=False)
 
     # DD.MM (yil yo'q)
     m = re.search(r"(\d{1,2})[-./](\d{1,2})$", text)
     if m:
         day, month = int(m.group(1)), int(m.group(2))
-        return _normalize_date(year, month, day, today)
+        return _normalize_date(year, month, day, today, allow_rollover=True)
 
     # "12 mart", "mart 12", "12-mart"
     for month_name, month_num in MONTH_MAP.items():
@@ -210,14 +216,14 @@ def _parse_date(text: str) -> str | None:
         m = re.search(rf"(\d{{1,2}})\s*[-]?\s*{month_name}", text)
         if m:
             day = int(m.group(1))
-            normalized = _normalize_date(year, month_num, day, today)
+            normalized = _normalize_date(year, month_num, day, today, allow_rollover=True)
             if normalized:
                 return normalized
         # "mart 12"
         m = re.search(rf"{month_name}\s*[-]?\s*(\d{{1,2}})", text)
         if m:
             day = int(m.group(1))
-            normalized = _normalize_date(year, month_num, day, today)
+            normalized = _normalize_date(year, month_num, day, today, allow_rollover=True)
             if normalized:
                 return normalized
 
