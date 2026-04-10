@@ -150,6 +150,22 @@ MONTH_MAP = {
 }
 
 
+def _normalize_date(year: int, month: int, day: int, today: datetime) -> str | None:
+    """Sana qismlarini tekshiradi va YYYY-MM-DD qaytaradi."""
+    try:
+        dt = datetime(year, month, day)
+    except ValueError:
+        return None
+
+    # Foydalanuvchi yil kiritmasa, o'tib ketgan sanani keyingi yilga o'tkazamiz
+    if year == today.year and dt.date() < today.date():
+        try:
+            dt = datetime(year + 1, month, day)
+        except ValueError:
+            return None
+    return dt.strftime("%Y-%m-%d")
+
+
 def _parse_date(text: str) -> str | None:
     """
     Matndan sanani YYYY-MM-DD formatida qaytaradi.
@@ -162,25 +178,20 @@ def _parse_date(text: str) -> str | None:
     # YYYY-MM-DD
     m = re.search(r"(\d{4})[-./](\d{1,2})[-./](\d{1,2})", text)
     if m:
-        return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+        year, month, day = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        return _normalize_date(year, month, day, today)
 
     # DD.MM.YYYY yoki DD/MM/YYYY
     m = re.search(r"(\d{1,2})[-./](\d{1,2})[-./](\d{4})", text)
     if m:
-        return f"{m.group(3)}-{int(m.group(2)):02d}-{int(m.group(1)):02d}"
+        day, month, year = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        return _normalize_date(year, month, day, today)
 
     # DD.MM (yil yo'q)
     m = re.search(r"(\d{1,2})[-./](\d{1,2})$", text)
     if m:
         day, month = int(m.group(1)), int(m.group(2))
-        try:
-            # Kelajakdagi yilni topish
-            dt = datetime(year, month, day)
-            if dt.date() < today.date():
-                dt = datetime(year + 1, month, day)
-            return dt.strftime("%Y-%m-%d")
-        except ValueError:
-            return None
+        return _normalize_date(year, month, day, today)
 
     # "12 mart", "mart 12", "12-mart"
     for month_name, month_num in MONTH_MAP.items():
@@ -188,24 +199,16 @@ def _parse_date(text: str) -> str | None:
         m = re.search(rf"(\d{{1,2}})\s*[-]?\s*{month_name}", text)
         if m:
             day = int(m.group(1))
-            try:
-                dt = datetime(year, month_num, day)
-                if dt.date() < today.date():
-                    dt = datetime(year + 1, month_num, day)
-                return dt.strftime("%Y-%m-%d")
-            except ValueError:
-                continue
+            normalized = _normalize_date(year, month_num, day, today)
+            if normalized:
+                return normalized
         # "mart 12"
         m = re.search(rf"{month_name}\s*[-]?\s*(\d{{1,2}})", text)
         if m:
             day = int(m.group(1))
-            try:
-                dt = datetime(year, month_num, day)
-                if dt.date() < today.date():
-                    dt = datetime(year + 1, month_num, day)
-                return dt.strftime("%Y-%m-%d")
-            except ValueError:
-                continue
+            normalized = _normalize_date(year, month_num, day, today)
+            if normalized:
+                return normalized
 
     return None
 
@@ -221,6 +224,7 @@ async def _build_system_prompt(platform: str = "telegram") -> str:
     loc = await get_hotel_location()
 
     room_lines = []
+    room_facts = []
     for r in rooms:
         price = f"{r['price']:,}".replace(",", " ")
         amenities = (r.get("amenities") or "").replace("|", ", ")
@@ -231,7 +235,20 @@ async def _build_system_prompt(platform: str = "telegram") -> str:
             f"{f' | Qulayliklar: {amenities}' if amenities else ''}"
             f"{f' | Raqamlar: {room_numbers}' if room_numbers else ''}"
         )
+        room_facts.append(
+            {
+                "id": r.get("id"),
+                "name": r.get("name"),
+                "price_per_day": r.get("price"),
+                "capacity": r.get("capacity"),
+                "quantity": r.get("quantity"),
+                "description": r.get("description"),
+                "amenities": r.get("amenities"),
+                "room_numbers": r.get("room_numbers"),
+            }
+        )
     rooms_text = "\n".join(room_lines) if room_lines else "Xonalar yangilanmoqda"
+    room_facts_json = json.dumps(room_facts, ensure_ascii=False)
 
     hotel_phone = hotel.get("phone", "+998773397171")
     hotel_address = hotel.get("address", "Do'mbirobod Naqqoshlik 121A")
@@ -261,6 +278,9 @@ Qo'shimcha ma'lumot: {hotel_about or "Admin paneldagi so'nggi ma'lumotlardan foy
 
 XONALAR:
 {rooms_text}
+
+XONALAR_JSON (aniq faktlar, javobda shu ma'lumotni asos qilib ol):
+{room_facts_json}
 
 SOATLIK IJARA: 200 000 - 250 000 so'm
 
