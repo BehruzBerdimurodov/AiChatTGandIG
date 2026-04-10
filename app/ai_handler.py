@@ -205,7 +205,7 @@ def _parse_date(text: str) -> str | None:
         return _normalize_date(year, month, day, today, allow_rollover=False)
 
     # DD.MM (yil yo'q)
-    m = re.search(r"(\d{1,2})[-./](\d{1,2})$", text)
+    m = re.search(r"\b(\d{1,2})[-./](\d{1,2})\b", text)
     if m:
         day, month = int(m.group(1)), int(m.group(2))
         return _normalize_date(year, month, day, today, allow_rollover=True)
@@ -559,7 +559,8 @@ async def _resolve_room(draft: dict, user_message: str, rooms: list) -> dict | N
 
     # Nom bo'yicha qidirish
     for r in rooms:
-        if r["name"].lower() in text or r["id"].lower() in text:
+        room_id_text = str(r.get("id", "")).lower()
+        if r["name"].lower() in text or (room_id_text and room_id_text in text):
             return r
         # Qisqa nom: "standart", "delux", "suite", "vip", "family", "premium"
         short = r["name"].lower().split()[0]
